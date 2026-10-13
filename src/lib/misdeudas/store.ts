@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { z } from "zod";
-import { isISODate } from "./dates";
-import { cents, cleanText, equalPercents } from "./money";
+import { isISODate } from "./dates.ts";
+import { cents, cleanText, equalPercents } from "./money.ts";
 import type { Card, Person, Purchase, TabId, ThemeChoice } from "./types";
 
 const ME = "p-me";
@@ -34,7 +34,10 @@ type LedgerState = {
   renamePerson: (id: string, name: string) => string | null;
   removePerson: (id: string) => string | null;
   addCard: (input: { personId: string; name: string; last4: string }) => string | null;
-  updateCard: (id: string, input: { personId: string; name: string; last4: string }) => string | null;
+  updateCard: (
+    id: string,
+    input: { personId: string; name: string; last4: string },
+  ) => string | null;
   removeCard: (id: string) => string | null;
   savePurchase: (input: PurchaseInput, id?: string) => string | null;
   removePurchase: (id: string) => void;
@@ -47,7 +50,9 @@ type LedgerState = {
 
 function uid(prefix: string): string {
   const cryptoId = globalThis.crypto?.randomUUID?.();
-  return cryptoId ? `${prefix}-${cryptoId}` : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return cryptoId
+    ? `${prefix}-${cryptoId}`
+    : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function mePerson(): Person {
@@ -118,32 +123,61 @@ function exampleLedger(): Pick<LedgerState, "people" | "cards" | "purchases"> {
   return { people: [mePerson(), ana], cards: [bbva, nu], purchases };
 }
 
-function validateCardFields(name: string, last4: string, personId: string, people: Person[]): string | null {
+function validateCardFields(
+  name: string,
+  last4: string,
+  personId: string,
+  people: Person[],
+): string | null {
   if (!people.some((person) => person.id === personId)) return "Elige de quién es la tarjeta.";
   if (cleanText(name, 40).length < 2) return "Escribe el nombre de la tarjeta.";
   if (!/^\d{4}$/.test(last4)) return "La terminación son exactamente 4 números.";
   return null;
 }
 
-export function validatePurchase(input: PurchaseInput, people: Person[], cards: Card[]): string | null {
+export function validatePurchase(
+  input: PurchaseInput,
+  people: Person[],
+  cards: Card[],
+): string | null {
   if (cleanText(input.description, 120).length < 2) return "Escribe qué compraste.";
   if (!isISODate(input.operationDate)) return "La fecha de la compra no es válida.";
   if (!Number.isInteger(input.months) || input.months < 1 || input.months > 48) {
     return "Los meses van de 1 a 48.";
   }
-  if (!Number.isFinite(input.totalAmount) || input.totalAmount <= 0) return "Escribe el monto de la compra.";
-  if (!Number.isFinite(input.monthlyPayment) || input.monthlyPayment <= 0) return "Escribe cuánto pagas al mes.";
+  if (
+    !Number.isFinite(input.totalAmount) ||
+    input.totalAmount <= 0 ||
+    input.totalAmount > 100_000_000 ||
+    cents(input.totalAmount) <= 0
+  ) {
+    return "Escribe un monto de compra válido.";
+  }
+  if (
+    !Number.isFinite(input.monthlyPayment) ||
+    input.monthlyPayment <= 0 ||
+    input.monthlyPayment > 100_000_000 ||
+    cents(input.monthlyPayment) <= 0
+  ) {
+    return "Escribe un pago mensual válido.";
+  }
   if (!people.some((person) => person.id === input.ownerId)) return "Elige de quién es la compra.";
-  if (input.cardId && !cards.some((card) => card.id === input.cardId)) return "Esa tarjeta ya no está.";
+  if (input.cardId && !cards.some((card) => card.id === input.cardId))
+    return "Esa tarjeta ya no está.";
   if (input.manualPayment != null) {
-    if (!Number.isInteger(input.manualPayment) || input.manualPayment < 0 || input.manualPayment > input.months) {
+    if (
+      !Number.isInteger(input.manualPayment) ||
+      input.manualPayment < 0 ||
+      input.manualPayment > input.months
+    ) {
       return "El número de pago tiene que estar entre 0 y los meses.";
     }
   }
   if (input.shares.length === 0) return "Alguien tiene que pagar.";
   const ids = new Set<string>();
   for (const share of input.shares) {
-    if (!people.some((person) => person.id === share.personId)) return "Hay una persona que ya no existe.";
+    if (!people.some((person) => person.id === share.personId))
+      return "Hay una persona que ya no existe.";
     if (ids.has(share.personId)) return "Una persona está repetida en el reparto.";
     ids.add(share.personId);
     if (!Number.isFinite(share.percent) || share.percent <= 0 || share.percent > 100) {
@@ -158,9 +192,15 @@ export function validatePurchase(input: PurchaseInput, people: Person[], cards: 
 function normalizeShares(shares: { personId: string; percent: number }[]) {
   const total = shares.reduce((sum, share) => sum + share.percent, 0);
   if (total <= 0) return shares.map((share) => ({ ...share, percent: 0 }));
-  const scaled = shares.map((share) => ({ ...share, percent: cents((share.percent / total) * 100) }));
+  const scaled = shares.map((share) => ({
+    ...share,
+    percent: cents((share.percent / total) * 100),
+  }));
   const drift = cents(100 - scaled.reduce((sum, share) => sum + share.percent, 0));
-  scaled[scaled.length - 1] = { ...scaled[scaled.length - 1]!, percent: cents(scaled[scaled.length - 1]!.percent + drift) };
+  scaled[scaled.length - 1] = {
+    ...scaled[scaled.length - 1]!,
+    percent: cents(scaled[scaled.length - 1]!.percent + drift),
+  };
   return scaled;
 }
 
@@ -182,12 +222,15 @@ const purchaseSchema = z.object({
   description: z.string().min(1).max(120),
   operationDate: z.string(),
   months: z.number().int().min(1).max(48),
-  totalAmount: z.number().positive().max(100_000_000),
-  monthlyPayment: z.number().positive().max(100_000_000),
+  totalAmount: z.number().min(0.01).max(100_000_000),
+  monthlyPayment: z.number().min(0.01).max(100_000_000),
   manualPayment: z.number().int().min(0).max(48).nullable(),
   ownerId: z.string(),
   cardId: z.string().nullable(),
-  shares: z.array(z.object({ personId: z.string(), percent: z.number().positive().max(100) })).min(1).max(20),
+  shares: z
+    .array(z.object({ personId: z.string(), percent: z.number().positive().max(100) }))
+    .min(1)
+    .max(20),
   example: z.boolean().optional(),
 });
 const backupSchema = z.object({
@@ -196,6 +239,116 @@ const backupSchema = z.object({
   cards: z.array(cardSchema).max(80),
   purchases: z.array(purchaseSchema).max(400),
 });
+
+type PersistedLedger = Pick<
+  LedgerState,
+  "people" | "cards" | "purchases" | "theme" | "tab" | "cleared"
+>;
+
+function uniqueById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+/** Treat localStorage as untrusted JSON before restoring it into the UI store. */
+export function sanitizePersistedState(value: unknown): PersistedLedger | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const cleared = raw.cleared === true;
+
+  const parsedPeople = Array.isArray(raw.people)
+    ? raw.people.slice(0, 80).flatMap((item) => {
+        const parsed = personSchema.safeParse(item);
+        if (!parsed.success) return [];
+        const name = cleanText(parsed.data.name, 60);
+        return name ? [{ ...parsed.data, name, example: Boolean(parsed.data.example) }] : [];
+      })
+    : [];
+  const people = uniqueById(parsedPeople);
+  if (people.length > 0) {
+    const meIndex = Math.max(
+      0,
+      people.findIndex((person) => person.isMe || person.id === ME),
+    );
+    for (let index = 0; index < people.length; index += 1) {
+      people[index] = { ...people[index]!, isMe: index === meIndex };
+    }
+  } else if (cleared) {
+    people.push(mePerson());
+  }
+  const peopleIds = new Set(people.map((person) => person.id));
+
+  const parsedCards = Array.isArray(raw.cards)
+    ? raw.cards.slice(0, 80).flatMap((item) => {
+        const parsed = cardSchema.safeParse(item);
+        if (!parsed.success || !peopleIds.has(parsed.data.personId)) return [];
+        const name = cleanText(parsed.data.name, 40);
+        return name.length >= 2
+          ? [{ ...parsed.data, name, example: Boolean(parsed.data.example) }]
+          : [];
+      })
+    : [];
+  const cards = uniqueById(parsedCards);
+  const cardIds = new Set(cards.map((card) => card.id));
+
+  const parsedPurchases = Array.isArray(raw.purchases)
+    ? raw.purchases.slice(0, 400).flatMap((item) => {
+        const parsed = purchaseSchema.safeParse(item);
+        if (
+          !parsed.success ||
+          !isISODate(parsed.data.operationDate) ||
+          !peopleIds.has(parsed.data.ownerId)
+        ) {
+          return [];
+        }
+        const description = cleanText(parsed.data.description, 120);
+        const totalAmount = cents(parsed.data.totalAmount);
+        const monthlyPayment = cents(parsed.data.monthlyPayment);
+        if (description.length < 2 || totalAmount <= 0 || monthlyPayment <= 0) return [];
+
+        const seenShareIds = new Set<string>();
+        const shares = parsed.data.shares.filter((share) => {
+          if (!peopleIds.has(share.personId) || seenShareIds.has(share.personId)) return false;
+          seenShareIds.add(share.personId);
+          return true;
+        });
+        const safeShares =
+          shares.length > 0 ? shares : [{ personId: parsed.data.ownerId, percent: 100 }];
+        return [
+          {
+            ...parsed.data,
+            description,
+            totalAmount,
+            monthlyPayment,
+            manualPayment:
+              parsed.data.manualPayment == null
+                ? null
+                : Math.min(parsed.data.months, parsed.data.manualPayment),
+            cardId:
+              parsed.data.cardId && cardIds.has(parsed.data.cardId) ? parsed.data.cardId : null,
+            shares: normalizeShares(safeShares),
+            example: Boolean(parsed.data.example),
+          },
+        ];
+      })
+    : [];
+  const purchases = uniqueById(parsedPurchases);
+
+  const theme = z.enum(["system", "light", "dark"]).safeParse(raw.theme);
+  const tab = z.enum(["resumen", "compras", "personas", "tarjetas", "ajustes"]).safeParse(raw.tab);
+  return {
+    people,
+    cards,
+    purchases,
+    theme: theme.success ? theme.data : "system",
+    tab: tab.success ? tab.data : "resumen",
+    cleared,
+  };
+}
 
 export function exportPayload(state: Pick<LedgerState, "people" | "cards" | "purchases">) {
   return {
@@ -210,7 +363,8 @@ function personUsed(id: string, cards: Card[], purchases: Purchase[]) {
   return (
     cards.some((card) => card.personId === id) ||
     purchases.some(
-      (purchase) => purchase.ownerId === id || purchase.shares.some((share) => share.personId === id),
+      (purchase) =>
+        purchase.ownerId === id || purchase.shares.some((share) => share.personId === id),
     )
   );
 }
@@ -239,7 +393,9 @@ export const useLedger = create<LedgerState>()(
         const clean = cleanText(name, 60);
         if (clean.length < 2) return "El nombre es muy corto.";
         set({
-          people: get().people.map((person) => (person.id === id ? { ...person, name: clean } : person)),
+          people: get().people.map((person) =>
+            person.id === id ? { ...person, name: clean } : person,
+          ),
         });
         return null;
       },
@@ -272,7 +428,13 @@ export const useLedger = create<LedgerState>()(
         set({
           cards: get().cards.map((card) =>
             card.id === id
-              ? { ...card, personId: input.personId, name: cleanText(input.name, 40), last4: input.last4, example: false }
+              ? {
+                  ...card,
+                  personId: input.personId,
+                  name: cleanText(input.name, 40),
+                  last4: input.last4,
+                  example: false,
+                }
               : card,
           ),
         });
@@ -357,6 +519,15 @@ export const useLedger = create<LedgerState>()(
         }
         const parsed = backupSchema.safeParse(json);
         if (!parsed.success) return "El respaldo no tiene el formato de Mis deudas.";
+        const hasDuplicateIds = (items: { id: string }[]) =>
+          new Set(items.map((item) => item.id)).size !== items.length;
+        if (
+          hasDuplicateIds(parsed.data.people) ||
+          hasDuplicateIds(parsed.data.cards) ||
+          hasDuplicateIds(parsed.data.purchases)
+        ) {
+          return "El respaldo contiene identificadores repetidos.";
+        }
         const peopleIn = parsed.data.people.map((person) => ({
           ...person,
           name: cleanText(person.name, 60),
@@ -373,12 +544,21 @@ export const useLedger = create<LedgerState>()(
         const peopleIds = new Set(people.map((person) => person.id));
         const cards = parsed.data.cards
           .filter((card) => peopleIds.has(card.personId))
-          .map((card) => ({ ...card, name: cleanText(card.name, 40), example: Boolean(card.example) }));
+          .map((card) => ({
+            ...card,
+            name: cleanText(card.name, 40),
+            example: Boolean(card.example),
+          }));
         const cardIds = new Set(cards.map((card) => card.id));
         const me = people.find((person) => person.isMe)!;
         const purchases = parsed.data.purchases.flatMap((purchase) => {
           if (!isISODate(purchase.operationDate) || !peopleIds.has(purchase.ownerId)) return [];
-          const shares = purchase.shares.filter((share) => peopleIds.has(share.personId));
+          const seenShareIds = new Set<string>();
+          const shares = purchase.shares.filter((share) => {
+            if (!peopleIds.has(share.personId) || seenShareIds.has(share.personId)) return false;
+            seenShareIds.add(share.personId);
+            return true;
+          });
           const safeShares = shares.length > 0 ? shares : [{ personId: me.id, percent: 100 }];
           return [
             {
@@ -412,6 +592,10 @@ export const useLedger = create<LedgerState>()(
         tab: state.tab,
         cleared: state.cleared,
       }),
+      merge: (persistedState, currentState) => {
+        const restored = sanitizePersistedState(persistedState);
+        return restored ? { ...currentState, ...restored } : currentState;
+      },
     },
   ),
 );

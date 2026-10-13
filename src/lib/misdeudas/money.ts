@@ -1,3 +1,5 @@
+import { stripControlCharacters } from "./sanitize.ts";
+
 export function cents(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value * 100) / 100;
@@ -22,7 +24,7 @@ export function splitMoney(amount: number, percents: number[]): number[] {
   if (percents.length === 0) return [];
   const raw = percents.map((percent) => (totalCents * percent) / 100);
   const floors = raw.map((value) => Math.floor(value));
-  let left = totalCents - floors.reduce((sum, value) => sum + value, 0);
+  const left = totalCents - floors.reduce((sum, value) => sum + value, 0);
   const order = raw
     .map((value, index) => ({ index, frac: value - floors[index] }))
     .sort((a, b) => b.frac - a.frac);
@@ -32,12 +34,12 @@ export function splitMoney(amount: number, percents: number[]): number[] {
 
 export function equalPercents(count: number): number[] {
   if (count <= 0) return [];
-  const base = Math.floor((10000 / count)) / 100;
+  const base = Math.floor(10000 / count) / 100;
   const values = Array.from({ length: count }, () => base);
   values[count - 1] = cents(100 - base * (count - 1));
   return values;
 }
 
 export function cleanText(value: string, max: number): string {
-  return value.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, max);
+  return stripControlCharacters(value).trim().slice(0, max);
 }

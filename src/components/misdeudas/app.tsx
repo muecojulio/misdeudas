@@ -1,21 +1,37 @@
+import * as Tabs from "@radix-ui/react-tabs";
+import { Link } from "@tanstack/react-router";
 import {
+  ArrowRight,
+  CalendarDays,
+  Check,
   CreditCard,
   LayoutDashboard,
   Plus,
   Receipt,
+  Search,
   Settings as SettingsIcon,
   Shield,
+  ShieldCheck,
+  Sparkles,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { dashboard, viewPurchase, type PurchaseView } from "@/lib/misdeudas/calc";
 import { formatDay, formatDayShort, todayISO } from "@/lib/misdeudas/dates";
+import { parseExchangeReference, type ExchangeReference } from "@/lib/misdeudas/exchange-rates";
 import { loadHolidays, type HolidaySource } from "@/lib/misdeudas/holidays";
 import { formatPercent, money } from "@/lib/misdeudas/money";
 import { exportPayload, useLedger } from "@/lib/misdeudas/store";
 import type { Card, Holiday, Person, TabId } from "@/lib/misdeudas/types";
 import { CardForm, PersonForm, PurchaseForm } from "./forms";
-import { PressButton, Progress, Sheet } from "./ui";
+import { TabPanelTransition } from "./tab-panel-transition";
+import { HorizontalRail, PressButton, Progress, Sheet, SwipeReveal } from "./ui";
 
 const TABS: { id: TabId; label: string; icon: typeof Receipt }[] = [
   { id: "resumen", label: "Resumen", icon: LayoutDashboard },
@@ -40,6 +56,8 @@ export function MisDeudasApp() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [personOpen, setPersonOpen] = useState(false);
   const [cardEditor, setCardEditor] = useState<null | { id?: string }>(null);
+  const [panelDirection, setPanelDirection] = useState<"forward" | "backward">("forward");
+  const panelSwipeStart = useRef<{ x: number; y: number; time: number } | null>(null);
 
   useEffect(() => {
     void Promise.resolve(useLedger.persist.rehydrate()).finally(() => {
@@ -47,9 +65,10 @@ export function MisDeudasApp() {
       if (state.people.length === 0 && state.purchases.length === 0 && !state.cleared) {
         state.loadExamples();
       }
-      if (!state.people.some((person) => person.isMe) && state.people.length > 0) {
-        /* import paths always keep one "yo"; examples do too */
+      if (!["resumen", "compras", "personas", "tarjetas", "ajustes"].includes(state.tab)) {
+        state.setTab("resumen");
       }
+      if (!["system", "light", "dark"].includes(state.theme)) state.setTheme("system");
       state.setHydrated(true);
       setToday(todayISO());
     });
@@ -62,6 +81,7 @@ export function MisDeudasApp() {
   }, [theme]);
 
   useEffect(() => {
+    if (!hydrated) return;
     let cancel = false;
     const year = new Date().getFullYear();
     void Promise.all([loadHolidays(year), loadHolidays(year + 1)]).then((results) => {
@@ -90,115 +110,164 @@ export function MisDeudasApp() {
   const me = people.find((person) => person.isMe);
   const detail = views.find((view) => view.purchase.id === detailId) ?? null;
 
+  function handleTabChange(nextValue: string) {
+    const nextIndex = TABS.findIndex((item) => item.id === nextValue);
+    const currentIndex = TABS.findIndex((item) => item.id === tab);
+    if (nextIndex < 0 || nextValue === tab) return;
+    setPanelDirection(nextIndex > currentIndex ? "forward" : "backward");
+    setTab(nextValue as TabId);
+  }
+
+  function onPanelPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== "touch" || !event.isPrimary) return;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest(
+        "button, a, input, select, textarea, [role='tab'], [contenteditable='true'], [data-horizontal-scroll], [data-no-tab-swipe], [data-no-swipe]",
+      )
+    ) {
+      return;
+    }
+    panelSwipeStart.current = { x: event.clientX, y: event.clientY, time: performance.now() };
+  }
+
+  function onPanelPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const start = panelSwipeStart.current;
+    panelSwipeStart.current = null;
+    if (!start || event.pointerType !== "touch") return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    const elapsed = Math.max(1, performance.now() - start.time);
+    const fastEnough = Math.abs(deltaX) >= 28 && Math.abs(deltaX / elapsed) > 0.5;
+    if (Math.abs(deltaX) <= Math.abs(deltaY) * 1.2 || (Math.abs(deltaX) < 56 && !fastEnough)) {
+      return;
+    }
+    const currentIndex = TABS.findIndex((item) => item.id === tab);
+    const nextIndex = currentIndex + (deltaX < 0 ? 1 : -1);
+    const nextTab = TABS[nextIndex];
+    if (nextTab) handleTabChange(nextTab.id);
+  }
+
   return (
-    <div className="min-h-dvh bg-paper text-ink">
-      <div className="mx-auto flex min-h-dvh max-w-6xl">
-        <aside className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col border-r border-stone px-4 py-6 md:flex">
-          <p className="text-xs font-medium tracking-widest text-mist uppercase">Libreta</p>
-          <p className="font-display text-3xl">Mis deudas</p>
-          <p className="mt-1 text-sm text-mist">Compras a meses sin intereses</p>
-          <nav className="mt-8 flex flex-col gap-1">
-            {TABS.map((item) => (
-              <NavButton key={item.id} item={item} active={tab === item.id} onClick={() => setTab(item.id)} />
-            ))}
-          </nav>
-          <PressButton
-            type="button"
-            className="mt-auto flex h-12 items-center justify-center gap-2 rounded-2xl bg-pine font-medium text-on-pine"
-            onClick={() => setEditor({})}
-          >
-            <Plus className="size-4" /> Nueva compra
-          </PressButton>
-        </aside>
-        <div className="min-w-0 flex-1 pb-24 md:pb-12">
-          <header className="flex items-end justify-between gap-3 px-4 pt-5 pb-3 md:px-8 md:pt-8">
-            <div className="md:hidden">
-              <p className="text-xs font-medium tracking-widest text-mist uppercase">Libreta</p>
-              <h1 className="font-display text-4xl leading-tight">Mis deudas</h1>
+    <Tabs.Root
+      value={tab}
+      onValueChange={handleTabChange}
+      activationMode="automatic"
+      className="app-shell min-h-dvh bg-paper text-ink"
+    >
+      <div className="app-canvas min-h-dvh">
+        <div className="mx-auto min-h-dvh max-w-6xl px-4 md:px-8">
+          <header className="app-topbar">
+            <div className="brand-lockup">
+              <span className="brand-mark" aria-hidden="true">
+                <Sparkles className="size-5" strokeWidth={1.9} />
+              </span>
+              <div>
+                <p className="brand-kicker">LIBRETA PARA PAGOS</p>
+                <p className="brand-name">Mis deudas</p>
+              </div>
             </div>
-            <div className="hidden md:block">
-              <h1 className="font-display text-4xl">{TABS.find((item) => item.id === tab)?.label}</h1>
-              <p className="text-sm text-mist">Pagos, meses y lo que falta, en este teléfono.</p>
+            <div className="topbar-status">
+              <span className="privacy-pill">
+                <ShieldCheck className="size-4" aria-hidden="true" />
+                <span>Privada en este dispositivo</span>
+              </span>
+            </div>
+          </header>
+
+          <section className="section-heading">
+            <div className="min-w-0">
+              <p className="section-kicker">
+                {tab === "resumen" && me
+                  ? `HOLA, ${me.name.toLocaleUpperCase("es-MX")}`
+                  : "CUENTAS CLARAS, PASO A PASO"}
+              </p>
+              <h1 className="section-title font-display">
+                {TABS.find((item) => item.id === tab)?.label}
+              </h1>
+              <p className="section-description">{tabDescription(tab)}</p>
             </div>
             {ready && (tab === "resumen" || tab === "compras") ? (
               <PressButton
                 type="button"
-                className="hidden h-11 items-center gap-2 rounded-full bg-pine px-4 text-sm font-medium text-on-pine md:flex"
+                aria-label="Agregar compra"
+                className="new-purchase-button flex shrink-0 items-center justify-center gap-2 rounded-full bg-pine px-4 font-semibold text-on-pine"
                 onClick={() => setEditor({})}
               >
-                <Plus className="size-4" /> Agregar
-              </PressButton>
-            ) : (
-              <span className="hidden md:block" />
-            )}
-            {ready && (tab === "resumen" || tab === "compras") ? (
-              <PressButton
-                type="button"
-                aria-label="Nueva compra"
-                className="grid size-12 place-items-center rounded-full bg-pine text-on-pine md:hidden"
-                onClick={() => setEditor({})}
-              >
-                <Plus className="size-5" />
+                <Plus className="size-5" aria-hidden="true" />
+                <span className="hidden sm:inline">Agregar compra</span>
               </PressButton>
             ) : null}
-          </header>
-          <main className="px-4 md:px-8">
-            {!ready || !today ? (
-              <Loading />
-            ) : tab === "resumen" ? (
-              <Summary
-                board={board}
-                meId={me?.id}
-                peopleById={peopleById}
-                cardsById={cardsById}
-                onOpen={setDetailId}
-                hasExamples={purchases.some((purchase) => purchase.example)}
-                onExamples={() => setTab("ajustes")}
-              />
-            ) : tab === "compras" ? (
-              <Purchases
-                views={views}
-                peopleById={peopleById}
-                cardsById={cardsById}
-                meId={me?.id}
-                onOpen={setDetailId}
-              />
-            ) : tab === "personas" ? (
-              <People
-                views={views}
-                people={people}
-                onAdd={() => setPersonOpen(true)}
-              />
-            ) : tab === "tarjetas" ? (
-              <Cards
-                cards={cards}
-                peopleById={peopleById}
-                views={views}
-                onAdd={() => setCardEditor({})}
-                onEdit={(id) => setCardEditor({ id })}
-              />
-            ) : (
-              <Settings holidaySource={holidaySource} holidayCount={holidays.length} />
-            )}
+          </section>
+
+          <TabsNavigation />
+
+          <main className="app-main">
+            <Tabs.Content
+              value={tab}
+              className="tab-panel"
+              aria-busy={!ready}
+              onPointerDown={onPanelPointerDown}
+              onPointerUp={onPanelPointerUp}
+              onPointerCancel={() => {
+                panelSwipeStart.current = null;
+              }}
+            >
+              <TabPanelTransition tab={tab} direction={panelDirection}>
+                {!ready || !today ? (
+                  <Loading />
+                ) : tab === "resumen" ? (
+                  <Summary
+                    board={board}
+                    meId={me?.id}
+                    peopleById={peopleById}
+                    cardsById={cardsById}
+                    onOpen={setDetailId}
+                    hasExamples={purchases.some((purchase) => purchase.example)}
+                    onExamples={() => handleTabChange("ajustes")}
+                  />
+                ) : tab === "compras" ? (
+                  <Purchases
+                    views={views}
+                    peopleById={peopleById}
+                    cardsById={cardsById}
+                    meId={me?.id}
+                    onOpen={setDetailId}
+                  />
+                ) : tab === "personas" ? (
+                  <People views={views} people={people} onAdd={() => setPersonOpen(true)} />
+                ) : tab === "tarjetas" ? (
+                  <Cards
+                    cards={cards}
+                    peopleById={peopleById}
+                    views={views}
+                    onAdd={() => setCardEditor({})}
+                    onEdit={(id) => setCardEditor({ id })}
+                  />
+                ) : (
+                  <Settings holidaySource={holidaySource} holidayCount={holidays.length} />
+                )}
+              </TabPanelTransition>
+            </Tabs.Content>
           </main>
+
+          <footer className="app-footer">
+            <span>
+              <ShieldCheck className="size-4" aria-hidden="true" /> Tus compras no se suben a una
+              cuenta
+            </span>
+            <Link to="/privacidad" className="footer-link">
+              Leer privacidad <ArrowRight className="size-3.5" aria-hidden="true" />
+            </Link>
+          </footer>
         </div>
       </div>
-      <nav className="dock fixed inset-x-0 bottom-0 z-30 border-t border-stone bg-paper/95 backdrop-blur md:hidden">
-        <div className="mx-auto grid max-w-lg grid-cols-5">
-          {TABS.map((item) => (
-            <PressButton
-              key={item.id}
-              type="button"
-              onClick={() => setTab(item.id)}
-              className={`flex h-16 flex-col items-center justify-center gap-1 text-xs font-medium ${tab === item.id ? "text-pine" : "text-mist"}`}
-            >
-              <item.icon className="size-5" strokeWidth={1.75} />
-              {item.label}
-            </PressButton>
-          ))}
-        </div>
-      </nav>
-      <Sheet open={editor != null} title={editor?.id ? "Editar compra" : "Nueva compra"} onClose={() => setEditor(null)}>
+      <Sheet
+        open={editor != null}
+        title={editor?.id ? "Editar compra" : "Nueva compra"}
+        onClose={() => setEditor(null)}
+      >
         {editor ? (
           <PurchaseForm
             key={editor.id ?? "nueva"}
@@ -207,7 +276,11 @@ export function MisDeudasApp() {
           />
         ) : null}
       </Sheet>
-      <Sheet open={detail != null} title={detail?.purchase.description ?? "Compra"} onClose={() => setDetailId(null)}>
+      <Sheet
+        open={detail != null}
+        title={detail?.purchase.description ?? "Compra"}
+        onClose={() => setDetailId(null)}
+      >
         {detail && today ? (
           <PurchaseDetail
             view={detail}
@@ -225,40 +298,121 @@ export function MisDeudasApp() {
       <Sheet open={personOpen} title="Nueva persona" onClose={() => setPersonOpen(false)}>
         {personOpen ? <PersonForm onDone={() => setPersonOpen(false)} /> : null}
       </Sheet>
-      <Sheet open={cardEditor != null} title={cardEditor?.id ? "Editar tarjeta" : "Nueva tarjeta"} onClose={() => setCardEditor(null)}>
-        {cardEditor ? <CardForm key={cardEditor.id ?? "nueva"} cardId={cardEditor.id} onDone={() => setCardEditor(null)} /> : null}
+      <Sheet
+        open={cardEditor != null}
+        title={cardEditor?.id ? "Editar tarjeta" : "Nueva tarjeta"}
+        onClose={() => setCardEditor(null)}
+      >
+        {cardEditor ? (
+          <CardForm
+            key={cardEditor.id ?? "nueva"}
+            cardId={cardEditor.id}
+            onDone={() => setCardEditor(null)}
+          />
+        ) : null}
       </Sheet>
-    </div>
+    </Tabs.Root>
   );
 }
 
-function NavButton({
-  item,
-  active,
-  onClick,
-}: {
-  item: (typeof TABS)[number];
-  active: boolean;
-  onClick: () => void;
-}) {
+function tabDescription(tab: TabId): string {
+  const descriptions: Record<TabId, string> = {
+    resumen: "Lo importante de tus mensualidades, de un vistazo.",
+    compras: "Encuentra cada compra y sigue sus pagos.",
+    personas: "Reparte cada plan con quien tú quieras.",
+    tarjetas: "Controla tus tarjetas sin guardar el número completo.",
+    ajustes: "Apariencia, respaldo y privacidad de tu libreta.",
+  };
+  return descriptions[tab];
+}
+
+function TabsNavigation() {
+  const activeTab = useLedger((state) => state.tab);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [indicator, setIndicator] = useState({ left: 0, width: 0 });
+  const [overflow, setOverflow] = useState({ left: false, right: false });
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const update = () => {
+      const active = list.querySelector<HTMLElement>("[data-state='active']");
+      if (active) {
+        const nextIndicator = { left: active.offsetLeft, width: active.offsetWidth };
+        setIndicator((current) =>
+          current.left === nextIndicator.left && current.width === nextIndicator.width
+            ? current
+            : nextIndicator,
+        );
+      }
+      const maxScroll = Math.max(0, list.scrollWidth - list.clientWidth);
+      const nextOverflow = { left: list.scrollLeft > 1, right: maxScroll - list.scrollLeft > 1 };
+      setOverflow((current) =>
+        current.left === nextOverflow.left && current.right === nextOverflow.right
+          ? current
+          : nextOverflow,
+      );
+    };
+    const active = list.querySelector<HTMLElement>("[data-state='active']");
+    if (active) {
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const centeredLeft = active.offsetLeft + active.offsetWidth / 2 - list.clientWidth / 2;
+      list.scrollTo({
+        left: Math.max(0, centeredLeft),
+        behavior: reducedMotion ? "auto" : "smooth",
+      });
+    }
+    update();
+    list.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    observer?.observe(list);
+    Array.from(list.children).forEach((child) => observer?.observe(child));
+    return () => {
+      list.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [activeTab]);
+
   return (
-    <PressButton
-      type="button"
-      onClick={onClick}
-      className={`flex h-11 items-center gap-3 rounded-2xl px-3 text-sm font-medium ${active ? "bg-pine text-on-pine" : "text-ink"}`}
-    >
-      <item.icon className="size-4" strokeWidth={1.75} />
-      {item.label}
-    </PressButton>
+    <div className="tabs-dock-shell">
+      <div
+        className="tabs-frame"
+        data-overflow-left={overflow.left || undefined}
+        data-overflow-right={overflow.right || undefined}
+      >
+        <Tabs.List ref={listRef} className="app-tabs" aria-label="Secciones principales">
+          <span
+            className="tabs-indicator"
+            aria-hidden="true"
+            style={{ width: indicator.width, transform: `translateX(${indicator.left}px)` }}
+          />
+          {TABS.map((item) => (
+            <Tabs.Trigger key={item.id} value={item.id} className="app-tab press">
+              <item.icon
+                className="size-[1.125rem] shrink-0"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+              <span>{item.label}</span>
+            </Tabs.Trigger>
+          ))}
+        </Tabs.List>
+      </div>
+      {overflow.right ? (
+        <span className="tabs-scroll-hint" aria-hidden="true">
+          Desliza
+        </span>
+      ) : null}
+    </div>
   );
 }
 
 function Loading() {
   return (
-    <div className="rise flex flex-col gap-3 pt-2">
-      <div className="h-40 rounded-3xl bg-stone/70" />
-      <div className="h-24 rounded-3xl bg-surface" />
-      <p className="text-sm text-mist">Abriendo tu libreta en este teléfono…</p>
+    <div className="loading-state rise flex flex-col gap-4 pt-2" role="status" aria-live="polite">
+      <div className="loading-skeleton h-48 rounded-[2rem]" aria-hidden="true" />
+      <div className="loading-skeleton h-24 rounded-3xl" aria-hidden="true" />
+      <p className="text-sm font-medium text-mist">Abriendo tu libreta en este dispositivo…</p>
     </div>
   );
 }
@@ -281,73 +435,177 @@ function Summary({
   onExamples: () => void;
 }) {
   const plan = board.paid + board.remaining;
-  const progress = plan > 0 ? (board.paid / plan) * 100 : 0;
+  const progress = plan > 0 ? Math.min(100, (board.paid / plan) * 100) : 0;
   const mine = meId ? board.byPerson.get(meId) : undefined;
   return (
-    <div className="flex flex-col gap-4">
+    <div className="summary-layout">
       {hasExamples ? (
-        <button type="button" onClick={onExamples} className="press rounded-2xl border border-stone bg-surface px-4 py-3 text-left text-sm text-mist">
-          Hay compras de ejemplo para que veas cómo se calcula. Puedes borrarlas en Ajustes.
-        </button>
+        <PressButton type="button" onClick={onExamples} className="example-callout">
+          <span className="example-stamp">
+            <Sparkles className="size-4" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1 text-left">
+            <span className="block font-semibold text-ink">Estás viendo datos de muestra</span>
+            <span className="block text-sm text-mist">
+              Puedes quitarlos desde Ajustes cuando quieras.
+            </span>
+          </span>
+          <ArrowRight className="size-4 shrink-0 text-pine" aria-hidden="true" />
+        </PressButton>
       ) : null}
-      <section className="rise rounded-3xl bg-pine px-5 py-5 text-on-pine">
-        <p className="text-sm text-on-pine/80">Te falta por pagar</p>
-        <p className="mt-1 font-display text-4xl leading-tight tabular-nums md:text-5xl">{money(board.remaining)}</p>
-        {mine && Math.abs(mine.remaining - board.remaining) > 0.5 ? (
-          <p className="mt-2 text-sm text-on-pine/85">Tu parte {money(mine.remaining)}</p>
-        ) : null}
-        <div className="mt-5 h-2 overflow-hidden rounded-full bg-on-pine/25">
-          <div className="bar-fill h-full rounded-full bg-on-pine" style={{ width: `${progress}%` }} />
+
+      <section className="summary-hero rise" aria-labelledby="summary-balance-title">
+        <div className="summary-hero-decoration" aria-hidden="true" />
+        <div className="summary-hero-topline">
+          <span className="hero-eyebrow">
+            <Sparkles className="size-4" aria-hidden="true" /> TU PLAN, MÁS CLARO
+          </span>
+          <span className="hero-tag">
+            {board.activeCount} {board.activeCount === 1 ? "plan activo" : "planes activos"}
+          </span>
         </div>
-        <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
-          <Stat label="Llevas pagado" value={money(board.paid)} />
-          <Stat label="Al mes" value={money(board.monthly)} />
-          <Stat label="Activas" value={String(board.activeCount)} />
+        <div className="summary-hero-main">
+          <div className="min-w-0">
+            <p id="summary-balance-title" className="hero-secondary text-sm font-medium">
+              Te falta por pagar
+            </p>
+            <p className="summary-balance tabular-nums">{money(board.remaining)}</p>
+            {mine && Math.abs(mine.remaining - board.remaining) > 0.5 ? (
+              <p className="hero-secondary mt-1 text-sm">Tu parte: {money(mine.remaining)}</p>
+            ) : null}
+          </div>
+          <div
+            className="paid-orbit"
+            role="img"
+            aria-label={`${Math.round(progress)} por ciento del plan está pagado`}
+            style={{
+              background: `conic-gradient(var(--color-lime) ${progress}%, rgba(255,255,255,.20) 0)`,
+            }}
+          >
+            <span className="paid-orbit-inner">
+              <strong>{Math.round(progress)}%</strong>
+              <small>pagado</small>
+            </span>
+          </div>
         </div>
+        <div className="summary-progress-wrap">
+          <Progress value={progress} label="Porcentaje pagado del plan" />
+          <div className="summary-progress-caption">
+            <span>{money(board.paid)} pagados</span>
+            <span>de {money(plan)}</span>
+          </div>
+        </div>
+        <span className="hero-doodle" aria-hidden="true">
+          ↗
+        </span>
       </section>
-      <section>
-        <h2 className="mb-2 font-display text-2xl">Por persona</h2>
+
+      <div className="summary-stats-grid" aria-label="Resumen de tus pagos">
+        <article className="summary-stat stat-lime">
+          <span className="stat-icon">
+            <Check className="size-4" aria-hidden="true" />
+          </span>
+          <span>
+            <span className="stat-label">Llevas pagado</span>
+            <strong>{money(board.paid)}</strong>
+          </span>
+        </article>
+        <article className="summary-stat stat-apricot">
+          <span className="stat-icon">
+            <CalendarDays className="size-4" aria-hidden="true" />
+          </span>
+          <span>
+            <span className="stat-label">Cada mes</span>
+            <strong>{money(board.monthly)}</strong>
+          </span>
+        </article>
+        <article className="summary-stat stat-lilac">
+          <span className="stat-icon">
+            <Receipt className="size-4" aria-hidden="true" />
+          </span>
+          <span>
+            <span className="stat-label">Por terminar</span>
+            <strong>
+              {board.activeCount} {board.activeCount === 1 ? "compra" : "compras"}
+            </strong>
+          </span>
+        </article>
+      </div>
+
+      <section className="dashboard-section">
+        <SectionTitle icon={Users} title="Por persona" detail="Así va el reparto" />
         {board.byPerson.size === 0 ? (
           <Empty text="Cuando agregues una compra, aquí verás cuánto le falta a cada quien." />
         ) : (
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {[...board.byPerson.values()].map((row) => (
-              <article key={row.personId} className="min-w-40 flex-1 rounded-2xl border border-stone bg-surface px-3 py-3">
-                <p className="truncate text-sm font-medium">{peopleById.get(row.personId)?.name ?? "Persona"}</p>
-                <p className="mt-1 font-display text-xl tabular-nums text-clay">{money(row.remaining)}</p>
-                <p className="text-xs text-mist">falta · {money(row.monthly)} al mes</p>
+          <HorizontalRail
+            label="Resumen de pagos por persona"
+            className="people-summary-rail"
+            innerClassName="people-summary-track"
+          >
+            {[...board.byPerson.values()].map((row, index) => (
+              <article key={row.personId} className={`person-total-card person-total-${index % 3}`}>
+                <div className="person-total-avatar" aria-hidden="true">
+                  {(peopleById.get(row.personId)?.name ?? "P").slice(0, 1).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">
+                    {peopleById.get(row.personId)?.name ?? "Persona"}
+                  </p>
+                  <p className="mt-2 font-display text-2xl tabular-nums">{money(row.remaining)}</p>
+                  <p className="text-xs text-mist">pendiente · {money(row.monthly)} al mes</p>
+                </div>
               </article>
             ))}
-          </div>
+          </HorizontalRail>
         )}
       </section>
-      <section>
-        <h2 className="mb-2 font-display text-2xl">Próximos cargos</h2>
+
+      <section className="dashboard-section">
+        <SectionTitle icon={CalendarDays} title="Próximos cargos" detail="Lo que viene" />
         {board.upcoming.length === 0 ? (
           <Empty text="No hay pagos pendientes. Las compras liquidadas se quedan en Compras." />
         ) : (
-          <div className="flex flex-col gap-2">
+          <HorizontalRail
+            label="Próximos cargos"
+            className="upcoming-rail"
+            innerClassName="upcoming-track"
+          >
             {board.upcoming.slice(0, 5).map((view) => (
-              <PurchaseRow
-                key={view.purchase.id}
-                view={view}
-                peopleById={peopleById}
-                cardsById={cardsById}
-                onOpen={onOpen}
-              />
+              <div className="upcoming-item" key={view.purchase.id}>
+                <PurchaseRow
+                  view={view}
+                  peopleById={peopleById}
+                  cardsById={cardsById}
+                  onOpen={onOpen}
+                  actionsEnabled={false}
+                />
+              </div>
             ))}
-          </div>
+          </HorizontalRail>
         )}
       </section>
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function SectionTitle({
+  icon: Icon,
+  title,
+  detail,
+}: {
+  icon: typeof Users;
+  title: string;
+  detail: string;
+}) {
   return (
-    <div>
-      <p className="text-on-pine/75">{label}</p>
-      <p className="font-medium tabular-nums">{value}</p>
+    <div className="section-title-row">
+      <span className="section-title-icon">
+        <Icon className="size-[1.125rem]" aria-hidden="true" />
+      </span>
+      <div className="min-w-0">
+        <h2 className="font-display text-2xl leading-tight">{title}</h2>
+        <p className="text-sm text-mist">{detail}</p>
+      </div>
     </div>
   );
 }
@@ -374,42 +632,77 @@ function Purchases({
     if (filter === "otras" && view.purchase.ownerId === meId) return false;
     const owner = peopleById.get(view.purchase.ownerId)?.name ?? "";
     const card = view.purchase.cardId ? cardsById.get(view.purchase.cardId) : undefined;
-    const haystack = `${view.purchase.description} ${owner} ${card?.name ?? ""} ${card?.last4 ?? ""}`.toLowerCase();
-    return haystack.includes(query.trim().toLowerCase());
+    const haystack = normalizeText(
+      `${view.purchase.description} ${owner} ${card?.name ?? ""} ${card?.last4 ?? ""}`,
+    );
+    return haystack.includes(normalizeText(query.trim()));
   });
+  const filters = [
+    ["activas", "Activas"],
+    ["liquidadas", "Liquidadas"],
+    ["mias", "Mías"],
+    ["otras", "De otra persona"],
+  ] as const;
+
   return (
-    <div className="flex flex-col gap-3">
-      <input
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Buscar compra, persona o tarjeta"
-        className="h-12 w-full rounded-2xl border border-stone bg-surface px-3 text-base outline-none focus:border-pine"
-      />
-      <div className="flex gap-2 overflow-x-auto">
-        {(
-          [
-            ["activas", "Activas"],
-            ["liquidadas", "Liquidadas"],
-            ["mias", "Mías"],
-            ["otras", "De otra persona"],
-          ] as const
-        ).map(([id, label]) => (
+    <div className="purchases-layout">
+      <div className="purchase-search">
+        <Search className="size-5 shrink-0 text-pine" aria-hidden="true" />
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Buscar compra, persona o tarjeta"
+          aria-label="Buscar compra, persona o tarjeta"
+          className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-mist/80"
+        />
+        {query ? (
+          <PressButton
+            type="button"
+            className="grid size-11 place-items-center rounded-full text-mist"
+            aria-label="Limpiar búsqueda"
+            onClick={() => setQuery("")}
+          >
+            <span aria-hidden="true">×</span>
+          </PressButton>
+        ) : null}
+      </div>
+
+      <HorizontalRail
+        label="Filtros de compras"
+        className="filter-rail"
+        innerClassName="filter-list"
+      >
+        {filters.map(([id, label]) => (
           <PressButton
             key={id}
             type="button"
+            aria-pressed={filter === id}
             onClick={() => setFilter(id)}
-            className={`h-10 shrink-0 rounded-full px-4 text-sm font-medium ${filter === id ? "bg-pine text-on-pine" : "border border-stone bg-surface text-ink"}`}
+            className={`filter-chip ${filter === id ? "chip-active" : "chip-idle"}`}
           >
+            {filter === id ? <Check className="size-4" aria-hidden="true" /> : null}
             {label}
           </PressButton>
         ))}
-      </div>
+      </HorizontalRail>
+      <p className="results-caption" aria-live="polite">
+        {filtered.length} {filtered.length === 1 ? "compra" : "compras"}{" "}
+        {query ? "encontradas" : "en la libreta"}
+      </p>
+
       {filtered.length === 0 ? (
-        <Empty text="Nada con ese filtro. Agrega una compra con el botón de abajo." />
+        <Empty text="Nada con ese filtro. Prueba otra búsqueda o agrega una compra nueva." />
       ) : (
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="purchase-list-stack" role="region" aria-label="Compras encontradas">
           {filtered.map((view) => (
-            <PurchaseRow key={view.purchase.id} view={view} peopleById={peopleById} cardsById={cardsById} onOpen={onOpen} />
+            <PurchaseRow
+              key={view.purchase.id}
+              view={view}
+              peopleById={peopleById}
+              cardsById={cardsById}
+              onOpen={onOpen}
+            />
           ))}
         </div>
       )}
@@ -417,62 +710,135 @@ function Purchases({
   );
 }
 
+function normalizeText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-MX");
+}
+
 function PurchaseRow({
   view,
   peopleById,
   cardsById,
   onOpen,
+  actionsEnabled = true,
 }: {
   view: PurchaseView;
   peopleById: Map<string, Person>;
   cardsById: Map<string, Card>;
   onOpen: (id: string) => void;
+  actionsEnabled?: boolean;
 }) {
   const card = view.purchase.cardId ? cardsById.get(view.purchase.cardId) : undefined;
   const owner = peopleById.get(view.purchase.ownerId)?.name ?? "Sin dueño";
   const ratio = view.purchase.months > 0 ? (view.paymentNumber / view.purchase.months) * 100 : 0;
+  const setPaymentNumber = useLedger((state) => state.setPaymentNumber);
+  const [registered, setRegistered] = useState(false);
+  const purchase = view.purchase;
+
+  useEffect(() => {
+    if (!registered) return;
+    const timer = window.setTimeout(() => setRegistered(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [registered]);
+
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(view.purchase.id)}
-      className="press rise rounded-3xl border border-stone bg-surface px-4 py-3 text-left"
+    <SwipeReveal
+      label={`${purchase.description}, pago ${view.paymentNumber} de ${purchase.months}`}
+      className="purchase-swipe"
+      disabled={!actionsEnabled}
+      actions={
+        <>
+          <PressButton
+            type="button"
+            className="swipe-action-button"
+            disabled={view.settled || registered}
+            feedback={registered ? "success" : undefined}
+            feedbackLabel="Pago registrado"
+            onClick={() => {
+              setPaymentNumber(purchase.id, view.paymentNumber + 1);
+              setRegistered(true);
+            }}
+          >
+            Registrar pago
+          </PressButton>
+          <PressButton
+            type="button"
+            className="swipe-action-button"
+            onClick={() => onOpen(purchase.id)}
+          >
+            Ver detalle
+          </PressButton>
+        </>
+      }
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate font-medium">{view.purchase.description}</p>
-          <p className="truncate text-sm text-mist">
-            De {owner}
-            {card ? ` · ${card.name} ···· ${card.last4}` : ""}
-          </p>
+      <article className={`purchase-card ${view.settled ? "purchase-card-settled" : ""}`}>
+        <div className="purchase-card-top">
+          <span className="purchase-category-mark" aria-hidden="true">
+            <Receipt className="size-[1.125rem]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-base font-semibold">{purchase.description}</p>
+            <p className="truncate text-sm text-mist">
+              De {owner}
+              {card ? ` · ${card.name} ···· ${card.last4}` : ""}
+            </p>
+          </div>
+          <span
+            className="purchase-payment tabular-nums"
+            aria-label={`Pago ${view.paymentNumber} de ${purchase.months}`}
+          >
+            <strong>{view.paymentNumber}</strong>
+            <small>/{purchase.months}</small>
+          </span>
         </div>
-        <p className="shrink-0 font-display text-xl tabular-nums">
-          {view.paymentNumber} <span className="text-base text-mist">de {view.purchase.months}</span>
-        </p>
-      </div>
-      <div className="mt-3">
-        <Progress value={ratio} />
-      </div>
-      <div className="mt-3 flex items-end justify-between gap-3 text-sm">
-        <div>
-          <p className="text-mist">{view.settled ? "Liquidada" : "Falta"}</p>
-          <p className={`font-medium tabular-nums ${view.settled ? "text-pine" : "text-clay"}`}>
-            {view.settled ? money(view.paid) : money(view.remaining)}
-          </p>
+        <div className="purchase-card-progress">
+          <Progress value={ratio} label={`Pagos realizados en ${purchase.description}`} />
         </div>
-        <p className="text-right text-mist">
-          {money(view.purchase.monthlyPayment)} al mes
-          <br />
-          {view.shares.map((share) => peopleById.get(share.personId)?.name ?? "").filter(Boolean).join(" · ")}
-        </p>
-      </div>
-      {view.nextDue ? (
-        <p className={`mt-2 text-sm ${view.holidayName || view.weekend || view.overdue ? "text-clay" : "text-mist"}`}>
-          {view.overdue ? "Venció" : "Siguiente"} {formatDayShort(view.nextDue)}
-          {view.holidayName ? ` · ${view.holidayName}` : view.weekend ? " · fin de semana" : ""}
-          {view.chargeDate && view.chargeDate !== view.nextDue ? ` · hábil ${formatDayShort(view.chargeDate)}` : ""}
-        </p>
-      ) : null}
-    </button>
+        <div className="purchase-card-bottom">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-mist">
+              {view.settled ? "Total pagado" : "Pendiente"}
+            </p>
+            <p
+              className={`mt-0.5 font-display text-xl tabular-nums ${view.settled ? "text-pine" : "text-clay"}`}
+            >
+              {view.settled ? money(view.paid) : money(view.remaining)}
+            </p>
+          </div>
+          <div className="purchase-card-actions">
+            <p className="text-right text-sm font-semibold tabular-nums">
+              {money(purchase.monthlyPayment)} <span className="font-normal text-mist">al mes</span>
+            </p>
+            <PressButton
+              type="button"
+              onClick={() => onOpen(purchase.id)}
+              className="purchase-details-link"
+              aria-label={`Ver detalles de ${purchase.description}`}
+            >
+              Ver detalles <ArrowRight className="size-3.5" aria-hidden="true" />
+            </PressButton>
+          </div>
+        </div>
+        {view.nextDue ? (
+          <p
+            className={`purchase-due ${view.overdue || view.holidayName || view.weekend ? "purchase-due-alert" : ""}`}
+          >
+            <CalendarDays className="size-4 shrink-0" aria-hidden="true" />
+            {view.overdue ? "Venció" : "Siguiente cargo"} {formatDayShort(view.nextDue)}
+            {view.holidayName ? ` · ${view.holidayName}` : view.weekend ? " · fin de semana" : ""}
+            {view.chargeDate && view.chargeDate !== view.nextDue
+              ? ` · hábil ${formatDayShort(view.chargeDate)}`
+              : ""}
+          </p>
+        ) : (
+          <p className="purchase-due purchase-due-paid">
+            <Check className="size-4" aria-hidden="true" /> Compra liquidada
+          </p>
+        )}
+      </article>
+    </SwipeReveal>
   );
 }
 
@@ -502,7 +868,9 @@ function PurchaseDetail({
       </p>
       <p className="text-sm text-mist">
         Pagos hechos. Comprada el {formatDay(purchase.operationDate)}. Es de {owner}.
-        {purchase.manualPayment == null ? " El número sigue la fecha." : " El número lo fijaste tú."}
+        {purchase.manualPayment == null
+          ? " El número sigue la fecha."
+          : " El número lo fijaste tú."}
       </p>
       <div className="grid grid-cols-2 gap-2">
         <Info label="Llevas pagado" value={money(view.paid)} />
@@ -530,17 +898,23 @@ function PurchaseDetail({
       )}
       {mismatch ? (
         <p className="text-sm text-mist">
-          El precio de la compra es {money(purchase.totalAmount)} y el plan (pago por meses) suma {money(view.planTotal)}. Lo que falta se calcula con el pago mensual que pusiste.
+          El precio de la compra es {money(purchase.totalAmount)} y el plan (pago por meses) suma{" "}
+          {money(view.planTotal)}. Lo que falta se calcula con el pago mensual que pusiste.
         </p>
       ) : null}
       <div>
         <h3 className="mb-2 text-sm font-medium">A cada persona le falta</h3>
         <ul className="flex flex-col gap-2">
           {view.shares.map((share) => (
-            <li key={share.personId} className="flex items-center justify-between rounded-2xl bg-surface px-3 py-3 text-sm">
+            <li
+              key={share.personId}
+              className="flex items-center justify-between rounded-2xl bg-surface px-3 py-3 text-sm"
+            >
               <span>
                 {peopleById.get(share.personId)?.name} · {formatPercent(share.percent)}%
-                <span className="block text-mist">{money(share.monthly)} al mes · ya pagó {money(share.paid)}</span>
+                <span className="block text-mist">
+                  {money(share.monthly)} al mes · ya pagó {money(share.paid)}
+                </span>
               </span>
               <span className="font-medium tabular-nums text-clay">{money(share.remaining)}</span>
             </li>
@@ -565,7 +939,11 @@ function PurchaseDetail({
           Registrar pago
         </PressButton>
       </div>
-      <PressButton type="button" className="h-12 rounded-2xl border border-stone font-medium" onClick={onEdit}>
+      <PressButton
+        type="button"
+        className="h-12 rounded-2xl border border-stone font-medium"
+        onClick={onEdit}
+      >
         Editar
       </PressButton>
       {confirm ? (
@@ -580,7 +958,11 @@ function PurchaseDetail({
           Confirmar borrado
         </PressButton>
       ) : (
-        <PressButton type="button" className="h-12 rounded-2xl text-sm font-medium text-clay" onClick={() => setConfirm(true)}>
+        <PressButton
+          type="button"
+          className="h-12 rounded-2xl text-sm font-medium text-clay"
+          onClick={() => setConfirm(true)}
+        >
           Borrar compra
         </PressButton>
       )}
@@ -592,7 +974,11 @@ function Info({ label, value, tone }: { label: string; value: string; tone?: "cl
   return (
     <div className="rounded-2xl border border-stone px-3 py-3">
       <p className="text-xs text-mist">{label}</p>
-      <p className={`font-medium tabular-nums ${tone === "clay" ? "text-clay" : tone === "pine" ? "text-pine" : "text-ink"}`}>{value}</p>
+      <p
+        className={`font-medium tabular-nums ${tone === "clay" ? "text-clay" : tone === "pine" ? "text-pine" : "text-ink"}`}
+      >
+        {value}
+      </p>
     </div>
   );
 }
@@ -611,73 +997,111 @@ function People({
   const [error, setError] = useState<string | null>(null);
   const rows = people.map((person) => {
     const owned = views.filter((view) => view.purchase.ownerId === person.id);
-    const paying = views.filter((view) => view.shares.some((share) => share.personId === person.id));
-    const remaining = paying.reduce((sum, view) => sum + (view.shares.find((share) => share.personId === person.id)?.remaining ?? 0), 0);
-    const paid = paying.reduce((sum, view) => sum + (view.shares.find((share) => share.personId === person.id)?.paid ?? 0), 0);
+    const paying = views.filter((view) =>
+      view.shares.some((share) => share.personId === person.id),
+    );
+    const remaining = paying.reduce(
+      (sum, view) =>
+        sum + (view.shares.find((share) => share.personId === person.id)?.remaining ?? 0),
+      0,
+    );
+    const paid = paying.reduce(
+      (sum, view) => sum + (view.shares.find((share) => share.personId === person.id)?.paid ?? 0),
+      0,
+    );
     return { person, owned, paying, remaining, paid };
   });
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-mist">Quién compra y quién paga pueden ser personas distintas.</p>
-        <PressButton type="button" onClick={onAdd} className="h-11 shrink-0 rounded-full bg-pine px-4 text-sm font-medium text-on-pine">
+    <div className="people-layout">
+      <div className="people-intro flex items-center justify-between gap-3">
+        <p className="text-sm text-mist">
+          Quién compra y quién paga pueden ser personas distintas.
+        </p>
+        <PressButton
+          type="button"
+          onClick={onAdd}
+          className="h-11 shrink-0 rounded-full bg-pine px-4 text-sm font-medium text-on-pine"
+        >
           Agregar
         </PressButton>
       </div>
-      {error ? <p className="text-sm text-clay">{error}</p> : null}
-      {rows.map(({ person, owned, paying, remaining, paid }) => (
-        <article key={person.id} className="rounded-3xl border border-stone bg-surface px-4 py-4">
-          <div className="flex items-center gap-3">
-            <span className="grid size-11 place-items-center rounded-full bg-pine text-sm font-medium text-on-pine">
-              {person.name.slice(0, 1).toUpperCase()}
-            </span>
-            <div className="min-w-0 flex-1">
-              <input
-                className="w-full bg-transparent font-display text-2xl outline-none"
-                aria-label={`Nombre de ${person.name}`}
-                defaultValue={person.name}
-                key={person.name}
-                onBlur={(event) => {
-                  const result = renamePerson(person.id, event.target.value);
-                  if (result) {
-                    setError(result);
-                    event.target.value = person.name;
-                  } else setError(null);
-                }}
-              />
-              <p className="text-sm text-mist">{person.isMe ? "Tú" : "Otra persona"}</p>
-            </div>
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-            <p>
-              <span className="block text-mist">Le falta pagar</span>
-              <span className="font-medium tabular-nums text-clay">{money(remaining)}</span>
-            </p>
-            <p>
-              <span className="block text-mist">Ya pagó</span>
-              <span className="font-medium tabular-nums">{money(paid)}</span>
-            </p>
-          </div>
-          <p className="mt-3 text-sm text-mist">
-            Compras a su nombre: {owned.length === 0 ? "ninguna" : owned.map((view) => view.purchase.description).join(", ")}
-          </p>
-          <p className="text-sm text-mist">
-            Está pagando: {paying.length === 0 ? "nada" : paying.map((view) => view.purchase.description).join(", ")}
-          </p>
-          {!person.isMe ? (
-            <PressButton
-              type="button"
-              className="mt-3 text-sm font-medium text-clay"
-              onClick={() => {
-                const result = removePerson(person.id);
-                setError(result);
-              }}
+      {error ? (
+        <p className="text-sm text-clay" role="alert" aria-live="assertive">
+          {error}
+        </p>
+      ) : null}
+      {rows.length === 0 ? (
+        <Empty text="Agrega una persona para organizar los pagos compartidos." />
+      ) : (
+        <HorizontalRail
+          label="Personas de la libreta"
+          className="people-directory-rail"
+          innerClassName="people-directory-grid"
+        >
+          {rows.map(({ person, owned, paying, remaining, paid }, index) => (
+            <article
+              key={person.id}
+              className={`person-directory-card person-directory-${index % 3}`}
             >
-              Quitar persona
-            </PressButton>
-          ) : null}
-        </article>
-      ))}
+              <div className="flex items-center gap-3">
+                <span className="grid size-11 place-items-center rounded-full bg-pine text-sm font-medium text-on-pine">
+                  {person.name.slice(0, 1).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <input
+                    className="w-full rounded-lg bg-transparent font-display text-2xl outline-none focus-visible:ring-4 focus-visible:ring-pine/20"
+                    aria-label={`Nombre de ${person.name}`}
+                    defaultValue={person.name}
+                    key={person.name}
+                    onBlur={(event) => {
+                      const result = renamePerson(person.id, event.target.value);
+                      if (result) {
+                        setError(result);
+                        event.target.value = person.name;
+                      } else setError(null);
+                    }}
+                  />
+                  <p className="text-sm text-mist">{person.isMe ? "Tú" : "Otra persona"}</p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <p>
+                  <span className="block text-mist">Le falta pagar</span>
+                  <span className="font-medium tabular-nums text-clay">{money(remaining)}</span>
+                </p>
+                <p>
+                  <span className="block text-mist">Ya pagó</span>
+                  <span className="font-medium tabular-nums">{money(paid)}</span>
+                </p>
+              </div>
+              <p className="mt-3 text-sm text-mist">
+                Compras a su nombre:{" "}
+                {owned.length === 0
+                  ? "ninguna"
+                  : owned.map((view) => view.purchase.description).join(", ")}
+              </p>
+              <p className="text-sm text-mist">
+                Está pagando:{" "}
+                {paying.length === 0
+                  ? "nada"
+                  : paying.map((view) => view.purchase.description).join(", ")}
+              </p>
+              {!person.isMe ? (
+                <PressButton
+                  type="button"
+                  className="mt-3 text-sm font-medium text-clay"
+                  onClick={() => {
+                    const result = removePerson(person.id);
+                    setError(result);
+                  }}
+                >
+                  Quitar persona
+                </PressButton>
+              ) : null}
+            </article>
+          ))}
+        </HorizontalRail>
+      )}
     </div>
   );
 }
@@ -698,42 +1122,82 @@ function Cards({
   const removeCard = useLedger((state) => state.removeCard);
   const [error, setError] = useState<string | null>(null);
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-mist">Nombre, titular y terminación. Nunca el número completo.</p>
-        <PressButton type="button" onClick={onAdd} className="h-11 shrink-0 rounded-full bg-pine px-4 text-sm font-medium text-on-pine">
-          Agregar
+    <div className="cards-layout">
+      <div className="cards-intro flex items-center justify-between gap-3">
+        <p className="text-sm text-mist">
+          Nombre, titular y terminación. Nunca el número completo.
+        </p>
+        <PressButton
+          type="button"
+          onClick={onAdd}
+          className="h-11 shrink-0 rounded-full bg-pine px-4 text-sm font-semibold text-on-pine"
+        >
+          <Plus className="mr-1 size-4" aria-hidden="true" /> Agregar
         </PressButton>
       </div>
-      {error ? <p className="text-sm text-clay">{error}</p> : null}
-      {cards.length === 0 ? <Empty text="Todavía no hay tarjetas." /> : null}
-      <div className="grid gap-3 md:grid-cols-2">
-        {cards.map((card, index) => {
-          const linked = views.filter((view) => view.purchase.cardId === card.id && !view.settled);
-          const remaining = linked.reduce((sum, view) => sum + view.remaining, 0);
-          const dark = index % 2 === 1;
-          return (
-            <article key={card.id} className={`rounded-3xl px-5 py-5 ${dark ? "bg-ink text-paper" : "bg-pine text-on-pine"}`}>
-              <p className="text-sm opacity-80">{card.name}</p>
-              <p className="mt-4 font-display text-3xl tracking-widest tabular-nums">···· {card.last4}</p>
-              <p className="mt-4 text-sm">{peopleById.get(card.personId)?.name}</p>
-              <p className="text-sm opacity-80">Falta en compras de esta tarjeta {money(remaining)}</p>
-              <div className="mt-4 flex gap-2">
-                <PressButton type="button" className="h-10 rounded-full bg-paper/15 px-4 text-sm font-medium" onClick={() => onEdit(card.id)}>
-                  Editar
-                </PressButton>
-                <PressButton
-                  type="button"
-                  className="h-10 rounded-full px-4 text-sm font-medium"
-                  onClick={() => setError(removeCard(card.id))}
-                >
-                  Borrar
-                </PressButton>
-              </div>
-            </article>
-          );
-        })}
-      </div>
+      {error ? (
+        <p className="text-sm text-clay" role="alert" aria-live="assertive">
+          {error}
+        </p>
+      ) : null}
+      {cards.length === 0 ? (
+        <Empty text="Todavía no hay tarjetas. Agrega una para asociarla a tus compras." />
+      ) : (
+        <HorizontalRail
+          label="Tarjetas guardadas"
+          className="cards-rail"
+          innerClassName="cards-grid"
+        >
+          {cards.map((card, index) => {
+            const linked = views.filter(
+              (view) => view.purchase.cardId === card.id && !view.settled,
+            );
+            const remaining = linked.reduce((sum, view) => sum + view.remaining, 0);
+            const dark = index % 2 === 1;
+            return (
+              <article
+                key={card.id}
+                className={`payment-card ${dark ? "payment-card-ink" : "payment-card-pine"}`}
+              >
+                <div className="payment-card-shine" aria-hidden="true" />
+                <div className="payment-card-head">
+                  <p className="truncate font-semibold">{card.name}</p>
+                  <CreditCard className="size-5 opacity-80" aria-hidden="true" />
+                </div>
+                <p className="payment-card-number tabular-nums">···· {card.last4}</p>
+                <div className="payment-card-details">
+                  <span className="min-w-0">
+                    <small>TITULAR</small>
+                    <strong className="truncate">
+                      {peopleById.get(card.personId)?.name ?? "Sin titular"}
+                    </strong>
+                  </span>
+                  <span className="text-right">
+                    <small>PENDIENTE</small>
+                    <strong className="tabular-nums">{money(remaining)}</strong>
+                  </span>
+                </div>
+                <div className="payment-card-actions">
+                  <PressButton
+                    type="button"
+                    className="payment-card-action"
+                    onClick={() => onEdit(card.id)}
+                  >
+                    Editar
+                  </PressButton>
+                  <PressButton
+                    type="button"
+                    className="payment-card-action payment-card-action-delete"
+                    onClick={() => setError(removeCard(card.id))}
+                  >
+                    Borrar
+                  </PressButton>
+                </div>
+              </article>
+            );
+          })}
+        </HorizontalRail>
+      )}
     </div>
   );
 }
@@ -757,30 +1221,46 @@ function Settings({
 
   function download() {
     const state = useLedger.getState();
-    const blob = new Blob([JSON.stringify(exportPayload(state), null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(exportPayload(state), null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.download = "misdeudas-respaldo.json";
     link.click();
-    URL.revokeObjectURL(url);
-    setMessage("Respaldo descargado. Se queda en tus archivos, no se sube solo.");
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setMessage(
+      "Respaldo descargado. El archivo es una copia sin cifrar; guárdalo en un lugar privado.",
+    );
   }
 
   const sourceCopy =
     holidaySource === "vivo"
-      ? `Calendario de México en vivo (${holidayCount} fechas).`
+      ? `Calendario público de México actualizado (${holidayCount} fechas).`
       : holidaySource === "cache"
-        ? "Calendario guardado en este teléfono. Se refresca cada semana."
+        ? "Calendario guardado en este dispositivo. Se renueva cada semana."
         : holidaySource === "respaldo"
-          ? "Sin conexión al calendario. Usamos fechas de respaldo de México."
-          : "Consultando días festivos de México…";
+          ? "El calendario está sin conexión; usamos fechas de respaldo de México."
+          : "Consultando el calendario público de México…";
 
   return (
-    <div className="flex max-w-xl flex-col gap-4">
-      <section className="rounded-3xl border border-stone bg-surface px-4 py-4">
-        <h2 className="font-display text-2xl">Apariencia</h2>
-        <div className="mt-3 grid grid-cols-3 gap-2">
+    <div className="settings-layout">
+      <section className="settings-card settings-card-highlight">
+        <div className="settings-card-heading">
+          <span className="settings-icon settings-icon-lime">
+            <Sparkles className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="font-display text-2xl">Apariencia</h2>
+            <p className="text-sm text-mist">Que se sienta como tu libreta.</p>
+          </div>
+        </div>
+        <div
+          className="mt-4 grid grid-cols-3 gap-2"
+          role="group"
+          aria-label="Tema de la aplicación"
+        >
           {(
             [
               ["system", "Auto"],
@@ -791,83 +1271,283 @@ function Settings({
             <PressButton
               key={id}
               type="button"
+              aria-pressed={theme === id}
               onClick={() => setTheme(id)}
-              className={`h-11 rounded-2xl text-sm font-medium ${theme === id ? "bg-pine text-on-pine" : "border border-stone text-ink"}`}
+              className={`theme-choice ${theme === id ? "theme-choice-active" : "theme-choice-idle"}`}
             >
+              {theme === id ? <Check className="size-4" aria-hidden="true" /> : null}
               {label}
             </PressButton>
           ))}
         </div>
+        <p className="mt-3 text-xs text-mist">
+          Las animaciones se reducen automáticamente si tu dispositivo lo solicita.
+        </p>
       </section>
-      <section className="rounded-3xl border border-stone bg-surface px-4 py-4">
-        <h2 className="font-display text-2xl">Respaldo</h2>
-        <p className="mt-1 text-sm text-mist">Exporta o recupera tu libreta. El archivo no sale del teléfono hasta que tú lo compartes.</p>
+
+      <ExchangeRateCard />
+
+      <section className="settings-card">
+        <div className="settings-card-heading">
+          <span className="settings-icon settings-icon-apricot">
+            <ShieldCheck className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="font-display text-2xl">Tu información</h2>
+            <p className="text-sm text-mist">Privada y guardada localmente.</p>
+          </div>
+        </div>
+        <div className="privacy-summary-copy">
+          <p>
+            Tus compras, personas y tarjetas se guardan en el almacenamiento de este navegador; no
+            existe una cuenta ni una base de datos de compras en la aplicación.
+          </p>
+          <p>
+            El calendario público recibe solo el año. El tipo de cambio se consulta cuando tú lo
+            pides y solo comparte códigos de moneda.
+          </p>
+          <p>{sourceCopy}</p>
+        </div>
+        <Link to="/privacidad" className="settings-link">
+          Leer la política de privacidad <ArrowRight className="size-4" aria-hidden="true" />
+        </Link>
+      </section>
+
+      <section className="settings-card">
+        <div className="settings-card-heading">
+          <span className="settings-icon settings-icon-sky">
+            <ArrowRight className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="font-display text-2xl">Respaldo</h2>
+            <p className="text-sm text-mist">Llévate tu libreta o restáurala.</p>
+          </div>
+        </div>
+        <p className="mt-3 text-sm leading-relaxed text-mist">
+          La copia JSON incluye nombres, movimientos y terminaciones de tarjeta. No se sube a ningún
+          servidor, pero no está cifrada.
+        </p>
         <div className="mt-3 flex gap-2">
-          <PressButton type="button" onClick={download} className="h-11 flex-1 rounded-2xl bg-pine text-sm font-medium text-on-pine">
-            Descargar
+          <PressButton type="button" onClick={download} className="settings-primary-button flex-1">
+            Descargar copia
           </PressButton>
-          <PressButton type="button" onClick={() => fileRef.current?.click()} className="h-11 flex-1 rounded-2xl border border-stone text-sm font-medium">
-            Importar
+          <PressButton
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="settings-secondary-button flex-1"
+          >
+            Importar copia
           </PressButton>
           <input
             ref={fileRef}
             type="file"
-            accept="application/json"
-            className="hidden"
+            accept="application/json,.json"
+            className="sr-only"
+            aria-label="Seleccionar copia de seguridad JSON"
             onChange={async (event) => {
               const file = event.target.files?.[0];
               event.target.value = "";
               if (!file) return;
-              const text = await file.text();
-              setMessage(importBackup(text) ?? "Libreta restaurada.");
+              if (file.size > 1_000_000) {
+                setMessage("El archivo supera el límite de 1 MB.");
+                return;
+              }
+              try {
+                const text = await file.text();
+                setMessage(importBackup(text) ?? "Libreta restaurada correctamente.");
+              } catch {
+                setMessage("No se pudo leer el archivo. Intenta con otra copia JSON.");
+              }
             }}
           />
         </div>
       </section>
-      <section className="rounded-3xl border border-stone bg-surface px-4 py-4">
-        <h2 className="font-display text-2xl">Ejemplos</h2>
+
+      <section className="settings-card">
+        <div className="settings-card-heading">
+          <span className="settings-icon settings-icon-lilac">
+            <Receipt className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="font-display text-2xl">Datos de ejemplo</h2>
+            <p className="text-sm text-mist">Prueba los cálculos sin comprometer tu información.</p>
+          </div>
+        </div>
         <div className="mt-3 flex gap-2">
-          <PressButton type="button" onClick={() => { loadExamples(); setMessage("Ejemplos listos."); }} className="h-11 flex-1 rounded-2xl border border-stone text-sm font-medium">
-            Cargar
+          <PressButton
+            type="button"
+            onClick={() => {
+              loadExamples();
+              setMessage("Datos de ejemplo listos.");
+            }}
+            className="settings-secondary-button flex-1"
+          >
+            Cargar ejemplos
           </PressButton>
-          <PressButton type="button" onClick={() => { removeExamples(); setMessage("Ejemplos quitados."); }} className="h-11 flex-1 rounded-2xl border border-stone text-sm font-medium">
-            Quitar
+          <PressButton
+            type="button"
+            onClick={() => {
+              removeExamples();
+              setMessage("Datos de ejemplo quitados.");
+            }}
+            className="settings-secondary-button flex-1"
+          >
+            Quitar ejemplos
           </PressButton>
         </div>
       </section>
-      <section className="rounded-3xl border border-stone bg-surface px-4 py-4">
-        <h2 className="flex items-center gap-2 font-display text-2xl">
-          <Shield className="size-5" /> Privacidad
-        </h2>
-        <div className="mt-2 flex flex-col gap-2 text-sm leading-relaxed text-mist">
-          <p>Tus compras, nombres y terminaciones viven solo en este teléfono. No hay cuenta ni servidor de deudas.</p>
-          <p>La única conexión es el calendario público de días festivos de México. Se envía el año, nada más: ni montos, ni nombres, ni tarjetas.</p>
-          <p>No pedimos el número completo de la tarjeta. Si borras los datos de este navegador, la libreta se va con ellos. Por eso existe el respaldo.</p>
-          <p>{sourceCopy}</p>
+
+      <section className="settings-card settings-danger-card">
+        <div className="settings-card-heading">
+          <span className="settings-icon settings-icon-coral">
+            <Shield className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="font-display text-2xl text-clay">Borrar tu libreta</h2>
+            <p className="text-sm text-mist">
+              Elimina personas, compras y tarjetas de este navegador.
+            </p>
+          </div>
         </div>
-      </section>
-      <section className="rounded-3xl border border-stone px-4 py-4">
-        <h2 className="font-display text-2xl text-clay">Borrar todo</h2>
-        <p className="mt-1 text-sm text-mist">Escribe BORRAR para vaciar la libreta de este teléfono.</p>
-        <input className="mt-3 h-12 w-full rounded-2xl border border-stone bg-surface px-3 outline-none focus:border-clay" value={wipe} onChange={(event) => setWipe(event.target.value)} />
+        <label htmlFor="wipe-confirm" className="mt-4 block text-sm font-semibold">
+          Escribe BORRAR para confirmar
+        </label>
+        <input
+          id="wipe-confirm"
+          className="mt-2 min-h-11 w-full rounded-2xl border border-stone bg-surface px-3 outline-none transition focus-visible:border-clay focus-visible:ring-4 focus-visible:ring-clay/15"
+          autoComplete="off"
+          value={wipe}
+          onChange={(event) => setWipe(event.target.value)}
+        />
         <PressButton
           type="button"
           disabled={wipe !== "BORRAR"}
           onClick={() => {
             clearAll();
             setWipe("");
-            setMessage("Libreta vacía. Sigues siendo tú, sin compras.");
+            setMessage("Libreta vacía. El cambio solo afecta a este dispositivo.");
           }}
-          className="mt-3 h-11 w-full rounded-2xl bg-clay font-medium text-paper disabled:opacity-40"
+          className="settings-danger-button mt-3 w-full"
         >
           Borrar la libreta
         </PressButton>
       </section>
-      {message ? <p className="text-sm text-ink">{message}</p> : null}
+      {message ? (
+        <p className="settings-feedback" role="status" aria-live="polite">
+          {message}
+        </p>
+      ) : null}
     </div>
   );
 }
 
+function ExchangeRateCard() {
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [reference, setReference] = useState<ExchangeReference | null>(null);
+  const [amount, setAmount] = useState("1000");
+
+  async function refresh() {
+    setStatus("loading");
+    try {
+      const response = await fetch("/api/exchange-rates?base=MXN&symbols=USD,EUR", {
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("rate");
+      const parsed = parseExchangeReference(await response.json());
+      if (!parsed) throw new Error("rate");
+      setReference(parsed);
+      setStatus("success");
+    } catch {
+      setStatus("error");
+    }
+  }
+
+  const pesos = Number(amount);
+  const converted = (currency: "USD" | "EUR") =>
+    reference && Number.isFinite(pesos) && pesos >= 0
+      ? new Intl.NumberFormat("es-MX", {
+          style: "currency",
+          currency,
+          maximumFractionDigits: 2,
+        }).format(pesos * reference.rates[currency])
+      : "—";
+
+  return (
+    <section className="settings-card exchange-card">
+      <div className="settings-card-heading">
+        <span className="settings-icon settings-icon-sky">
+          <Sparkles className="size-5" aria-hidden="true" />
+        </span>
+        <div>
+          <h2 className="font-display text-2xl">Cambio de moneda</h2>
+          <p className="text-sm text-mist">Una referencia pública para compras en otro país.</p>
+        </div>
+      </div>
+      <div className="exchange-controls">
+        <label htmlFor="exchange-amount" className="text-sm font-semibold">
+          Monto en pesos
+        </label>
+        <input
+          id="exchange-amount"
+          className="min-h-11 w-full rounded-2xl border border-stone bg-surface px-3 tabular-nums outline-none focus-visible:border-pine focus-visible:ring-4 focus-visible:ring-pine/15"
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.01"
+          value={amount}
+          onChange={(event) => setAmount(event.target.value)}
+        />
+        <PressButton
+          type="button"
+          onClick={refresh}
+          feedback={status === "idle" ? undefined : status}
+          feedbackLabel={
+            status === "loading"
+              ? "Consultando el servicio público"
+              : status === "success"
+                ? "Tipo de cambio actualizado"
+                : "No se pudo consultar el tipo de cambio"
+          }
+          className="settings-primary-button"
+        >
+          {status === "loading"
+            ? "Consultando…"
+            : status === "success"
+              ? "Actualizar referencia"
+              : "Consultar tipo de cambio"}
+        </PressButton>
+      </div>
+      {reference ? (
+        <div className="exchange-results" aria-live="polite">
+          <p className="text-sm font-semibold">
+            {converted("USD")} <span>USD</span>
+          </p>
+          <p className="text-sm font-semibold">
+            {converted("EUR")} <span>EUR</span>
+          </p>
+          <p className="exchange-date">
+            Referencia del{" "}
+            {new Date(`${reference.date}T12:00:00`).toLocaleDateString("es-MX", {
+              dateStyle: "long",
+            })}
+          </p>
+        </div>
+      ) : null}
+      {status === "error" ? (
+        <p className="exchange-error" role="alert" aria-live="assertive">
+          No se pudo consultar la fuente pública. Puedes intentarlo más tarde; tus compras no
+          cambian.
+        </p>
+      ) : null}
+      <p className="mt-3 text-xs leading-relaxed text-mist">
+        Cotización de referencia de Frankfurter (sin clave ni registro). La conversión se calcula
+        aquí; no se envía el monto. No incluye tipo de cambio, comisiones ni condiciones de tu
+        banco.
+      </p>
+    </section>
+  );
+}
+
 function Empty({ text }: { text: string }) {
-  return <p className="rounded-3xl border border-dashed border-stone px-4 py-6 text-sm text-mist">{text}</p>;
+  return <p className="empty-state px-4 py-6 text-sm leading-relaxed">{text}</p>;
 }

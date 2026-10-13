@@ -10,11 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PrivacidadRouteImport } from './routes/privacidad'
+import { Route as ApiExchangeRatesRouteImport } from './routes/api/exchange-rates'
 import { Route as ApiHolidaysRouteImport } from './routes/api/holidays'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacidadRoute = PrivacidadRouteImport.update({
+  id: '/privacidad',
+  path: '/privacidad',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiExchangeRatesRoute = ApiExchangeRatesRouteImport.update({
+  id: '/api/exchange-rates',
+  path: '/api/exchange-rates',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiHolidaysRoute = ApiHolidaysRouteImport.update({
@@ -25,27 +37,35 @@ const ApiHolidaysRoute = ApiHolidaysRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/privacidad': typeof PrivacidadRoute
+  '/api/exchange-rates': typeof ApiExchangeRatesRoute
   '/api/holidays': typeof ApiHolidaysRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/privacidad': typeof PrivacidadRoute
+  '/api/exchange-rates': typeof ApiExchangeRatesRoute
   '/api/holidays': typeof ApiHolidaysRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/privacidad': typeof PrivacidadRoute
+  '/api/exchange-rates': typeof ApiExchangeRatesRoute
   '/api/holidays': typeof ApiHolidaysRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/holidays'
+  fullPaths: '/' | '/privacidad' | '/api/exchange-rates' | '/api/holidays'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/holidays'
-  id: '__root__' | '/' | '/api/holidays'
+  to: '/' | '/privacidad' | '/api/exchange-rates' | '/api/holidays'
+  id: '__root__' | '/' | '/privacidad' | '/api/exchange-rates' | '/api/holidays'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  PrivacidadRoute: typeof PrivacidadRoute
+  ApiExchangeRatesRoute: typeof ApiExchangeRatesRoute
   ApiHolidaysRoute: typeof ApiHolidaysRoute
 }
 
@@ -56,6 +76,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacidad': {
+      id: '/privacidad'
+      path: '/privacidad'
+      fullPath: '/privacidad'
+      preLoaderRoute: typeof PrivacidadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/exchange-rates': {
+      id: '/api/exchange-rates'
+      path: '/api/exchange-rates'
+      fullPath: '/api/exchange-rates'
+      preLoaderRoute: typeof ApiExchangeRatesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/holidays': {
@@ -70,6 +104,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  PrivacidadRoute: PrivacidadRoute,
+  ApiExchangeRatesRoute: ApiExchangeRatesRoute,
   ApiHolidaysRoute: ApiHolidaysRoute,
 }
 export const routeTree = rootRouteImport
