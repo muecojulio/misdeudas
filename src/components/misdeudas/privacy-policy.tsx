@@ -29,8 +29,9 @@ export function PrivacyPolicyPanel() {
           <h2>1. Qué información se guarda</h2>
           <p>
             Cuando usas la libreta, puedes guardar descripciones de compras, fechas, plazos,
-            importes, pagos mensuales, nombres de personas, repartos de pagos, nombres de tarjetas y
-            sus últimos cuatro dígitos, además de la apariencia y la sección que elegiste.
+            importes, pagos mensuales, nombres de personas, repartos de pagos, pagos a otras
+            personas con su fecha e importe y si están pagados, nombres de tarjetas y sus últimos
+            cuatro dígitos, además de la apariencia y la sección que elegiste.
           </p>
           <p>
             No solicites ni guardes aquí números completos de tarjeta, códigos de seguridad

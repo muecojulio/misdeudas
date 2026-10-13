@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { z } from "zod";
 import { isISODate } from "./dates.ts";
 import { cents, cleanText, equalPercents } from "./money.ts";
-import type { Card, Person, Purchase, TabId, ThemeChoice } from "./types";
+import type { Card, Payable, PayableInput, Person, Purchase, TabId, ThemeChoice } from "./types";
 
 const ME = "p-me";
 
@@ -23,6 +23,7 @@ type LedgerState = {
   people: Person[];
   cards: Card[];
   purchases: Purchase[];
+  payables: Payable[];
   theme: ThemeChoice;
   tab: TabId;
   cleared: boolean;
@@ -41,6 +42,9 @@ type LedgerState = {
   removeCard: (id: string) => string | null;
   savePurchase: (input: PurchaseInput, id?: string) => string | null;
   removePurchase: (id: string) => void;
+  savePayable: (input: PayableInput, id?: string) => string | null;
+  removePayable: (id: string) => void;
+  setPayablePaid: (id: string, paid: boolean) => void;
   setPaymentNumber: (id: string, paymentNumber: number) => void;
   loadExamples: () => void;
   removeExamples: () => void;
@@ -189,6 +193,23 @@ export function validatePurchase(
   return null;
 }
 
+export function validatePayable(input: PayableInput, people: Person[]): string | null {
+  if (!people.some((person) => person.id === input.personId && !person.isMe)) {
+    return "Elige a la persona a quien le tienes que pagar.";
+  }
+  if (cleanText(input.description, 120).length < 2) return "Escribe qué tienes que pagar.";
+  if (!isISODate(input.dueDate)) return "Escribe una fecha de pago válida.";
+  if (
+    !Number.isFinite(input.amount) ||
+    input.amount <= 0 ||
+    input.amount > 100_000_000 ||
+    cents(input.amount) <= 0
+  ) {
+    return "Escribe un importe válido, mayor que cero.";
+  }
+  return null;
+}
+
 function normalizeShares(shares: { personId: string; percent: number }[]) {
   const total = shares.reduce((sum, share) => sum + share.percent, 0);
   if (total <= 0) return shares.map((share) => ({ ...share, percent: 0 }));
@@ -233,16 +254,35 @@ const purchaseSchema = z.object({
     .max(20),
   example: z.boolean().optional(),
 });
-const backupSchema = z.object({
-  version: z.literal(1),
+const payableSchema = z.object({
+  id: z.string().min(1).max(80),
+  personId: z.string().min(1).max(80),
+  description: z.string().min(1).max(120),
+  amount: z.number().min(0.01).max(100_000_000),
+  dueDate: z.string(),
+  paid: z.boolean().default(false),
+});
+const backupCollections = {
   people: z.array(personSchema).max(80),
   cards: z.array(cardSchema).max(80),
   purchases: z.array(purchaseSchema).max(400),
-});
+};
+const backupSchema = z.discriminatedUnion("version", [
+  z.object({
+    version: z.literal(1),
+    ...backupCollections,
+    payables: z.array(payableSchema).max(400).optional(),
+  }),
+  z.object({
+    version: z.literal(2),
+    ...backupCollections,
+    payables: z.array(payableSchema).max(400),
+  }),
+]);
 
 type PersistedLedger = Pick<
   LedgerState,
-  "people" | "cards" | "purchases" | "theme" | "tab" | "cleared"
+  "people" | "cards" | "purchases" | "payables" | "theme" | "tab" | "cleared"
 >;
 
 function uniqueById<T extends { id: string }>(items: T[]): T[] {
@@ -252,6 +292,22 @@ function uniqueById<T extends { id: string }>(items: T[]): T[] {
     seen.add(item.id);
     return true;
   });
+}
+
+function sanitizePayables(value: unknown, people: Person[]): Payable[] {
+  if (!Array.isArray(value)) return [];
+  const parsed = value.slice(0, 400).flatMap((item) => {
+    const result = payableSchema.safeParse(item);
+    if (!result.success || validatePayable(result.data, people)) return [];
+    return [
+      {
+        ...result.data,
+        description: cleanText(result.data.description, 120),
+        amount: cents(result.data.amount),
+      },
+    ];
+  });
+  return uniqueById(parsed);
 }
 
 /** Treat localStorage as untrusted JSON before restoring it into the UI store. */
@@ -338,34 +394,52 @@ export function sanitizePersistedState(value: unknown): PersistedLedger | null {
     : [];
   const purchases = uniqueById(parsedPurchases);
 
+  const payables = sanitizePayables(raw.payables, people);
+
   const theme = z.enum(["system", "light", "dark"]).safeParse(raw.theme);
-  const tab = z.enum(["resumen", "compras", "personas", "tarjetas", "ajustes", "privacidad", "instalar"]).safeParse(raw.tab);
+  const tab = z
+    .enum([
+      "resumen",
+      "compras",
+      "pagos",
+      "personas",
+      "tarjetas",
+      "ajustes",
+      "privacidad",
+      "instalar",
+    ])
+    .safeParse(raw.tab);
   return {
     people,
     cards,
     purchases,
+    payables,
     theme: theme.success ? theme.data : "system",
     tab: tab.success ? tab.data : "resumen",
     cleared,
   };
 }
 
-export function exportPayload(state: Pick<LedgerState, "people" | "cards" | "purchases">) {
+export function exportPayload(
+  state: Pick<LedgerState, "people" | "cards" | "purchases" | "payables">,
+) {
   return {
-    version: 1 as const,
+    version: 2 as const,
     people: state.people,
     cards: state.cards,
     purchases: state.purchases,
+    payables: state.payables,
   };
 }
 
-function personUsed(id: string, cards: Card[], purchases: Purchase[]) {
+function personUsed(id: string, cards: Card[], purchases: Purchase[], payables: Payable[]) {
   return (
     cards.some((card) => card.personId === id) ||
     purchases.some(
       (purchase) =>
         purchase.ownerId === id || purchase.shares.some((share) => share.personId === id),
-    )
+    ) ||
+    payables.some((payable) => payable.personId === id)
   );
 }
 
@@ -375,6 +449,7 @@ export const useLedger = create<LedgerState>()(
       people: [],
       cards: [],
       purchases: [],
+      payables: [],
       theme: "system",
       tab: "resumen",
       cleared: false,
@@ -403,8 +478,8 @@ export const useLedger = create<LedgerState>()(
         const person = get().people.find((item) => item.id === id);
         if (!person) return "Esa persona ya no está.";
         if (person.isMe) return "Tu perfil se queda. Puedes cambiarte el nombre.";
-        if (personUsed(id, get().cards, get().purchases)) {
-          return "Todavía aparece en una tarjeta o en una compra.";
+        if (personUsed(id, get().cards, get().purchases, get().payables)) {
+          return "Todavía aparece en una tarjeta, una compra o un pago.";
         }
         set({ people: get().people.filter((item) => item.id !== id) });
         return null;
@@ -472,6 +547,32 @@ export const useLedger = create<LedgerState>()(
         return null;
       },
       removePurchase: (id) => set({ purchases: get().purchases.filter((item) => item.id !== id) }),
+      savePayable: (input, id) => {
+        const error = validatePayable(input, get().people);
+        if (error) return error;
+        const existing = id ? get().payables.find((payable) => payable.id === id) : undefined;
+        if (id && !existing) return "Ese pago ya no está.";
+        if (!existing && get().payables.length >= 400) return "Tu libreta admite hasta 400 pagos.";
+        const payable: Payable = {
+          id: id ?? uid("pay"),
+          personId: input.personId,
+          description: cleanText(input.description, 120),
+          amount: cents(input.amount),
+          dueDate: input.dueDate,
+          paid: existing?.paid ?? false,
+        };
+        set({
+          payables: existing
+            ? get().payables.map((item) => (item.id === payable.id ? payable : item))
+            : [payable, ...get().payables],
+        });
+        return null;
+      },
+      removePayable: (id) => set({ payables: get().payables.filter((item) => item.id !== id) }),
+      setPayablePaid: (id, paid) =>
+        set({
+          payables: get().payables.map((item) => (item.id === id ? { ...item, paid } : item)),
+        }),
       setPaymentNumber: (id, paymentNumber) => {
         set({
           purchases: get().purchases.map((purchase) => {
@@ -504,11 +605,15 @@ export const useLedger = create<LedgerState>()(
           (card) => !card.example || purchases.some((purchase) => purchase.cardId === card.id),
         );
         const people = get().people.filter(
-          (person) => person.isMe || !person.example || personUsed(person.id, cards, purchases),
+          (person) =>
+            person.isMe ||
+            !person.example ||
+            personUsed(person.id, cards, purchases, get().payables),
         );
         set({ people, cards, purchases });
       },
-      clearAll: () => set({ people: [mePerson()], cards: [], purchases: [], cleared: true }),
+      clearAll: () =>
+        set({ people: [mePerson()], cards: [], purchases: [], payables: [], cleared: true }),
       importBackup: (raw) => {
         if (raw.length > 1_000_000) return "El archivo es demasiado grande.";
         let json: unknown;
@@ -524,7 +629,8 @@ export const useLedger = create<LedgerState>()(
         if (
           hasDuplicateIds(parsed.data.people) ||
           hasDuplicateIds(parsed.data.cards) ||
-          hasDuplicateIds(parsed.data.purchases)
+          hasDuplicateIds(parsed.data.purchases) ||
+          hasDuplicateIds(parsed.data.payables ?? [])
         ) {
           return "El respaldo contiene identificadores repetidos.";
         }
@@ -576,7 +682,11 @@ export const useLedger = create<LedgerState>()(
             } satisfies Purchase,
           ];
         });
-        set({ people, cards, purchases, cleared: false });
+        const payables = sanitizePayables(parsed.data.payables, people);
+        if (payables.length !== (parsed.data.payables?.length ?? 0)) {
+          return "El respaldo contiene pagos con una persona, fecha o importe no válido.";
+        }
+        set({ people, cards, purchases, payables, cleared: false });
         return null;
       },
     }),
@@ -588,6 +698,7 @@ export const useLedger = create<LedgerState>()(
         people: state.people,
         cards: state.cards,
         purchases: state.purchases,
+        payables: state.payables,
         theme: state.theme,
         tab: state.tab,
         cleared: state.cleared,

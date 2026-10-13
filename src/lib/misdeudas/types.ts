@@ -33,6 +33,18 @@ export type Purchase = {
   example: boolean;
 };
 
+/** A purchase or expense that I must pay to another person on a specific date. */
+export type Payable = {
+  id: string;
+  personId: string;
+  description: string;
+  amount: number;
+  dueDate: string;
+  paid: boolean;
+};
+
+export type PayableInput = Pick<Payable, "personId" | "description" | "amount" | "dueDate">;
+
 export type Holiday = {
   date: string;
   localName: string;
@@ -41,10 +53,4 @@ export type Holiday = {
 export type ThemeChoice = "system" | "light" | "dark";
 
 export type TabId =
-  | "resumen"
-  | "compras"
-  | "personas"
-  | "tarjetas"
-  | "ajustes"
-  | "privacidad"
-  | "instalar";
+  "resumen" | "compras" | "pagos" | "personas" | "tarjetas" | "ajustes" | "privacidad" | "instalar";
