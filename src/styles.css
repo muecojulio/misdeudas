@@ -1,0 +1,150 @@
+@import "tailwindcss";
+@import "@fontsource/fraunces/latin-600.css";
+@import "@fontsource/outfit/latin-400.css";
+@import "@fontsource/outfit/latin-500.css";
+@import "@fontsource/outfit/latin-600.css";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --color-paper: #f3efe6;
+  --color-ink: #1a1814;
+  --color-pine: #1e4a38;
+  --color-on-pine: #f7f4ee;
+  --color-clay: #b85a28;
+  --color-stone: #e3ddd1;
+  --color-mist: #6f6a60;
+  --color-surface: #faf7f2;
+  --radius-card: 1.25rem;
+}
+
+:root {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-paper: #141613;
+    --color-ink: #f3efe6;
+    --color-pine: #9dccb0;
+    --color-on-pine: #14241b;
+    --color-clay: #e39a68;
+    --color-stone: #2c302a;
+    --color-mist: #b1ab9f;
+    --color-surface: #1c201b;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-paper: #141613;
+  --color-ink: #f3efe6;
+  --color-pine: #9dccb0;
+  --color-on-pine: #14241b;
+  --color-clay: #e39a68;
+  --color-stone: #2c302a;
+  --color-mist: #b1ab9f;
+  --color-surface: #1c201b;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-paper: #f3efe6;
+  --color-ink: #1a1814;
+  --color-pine: #1e4a38;
+  --color-on-pine: #f7f4ee;
+  --color-clay: #b85a28;
+  --color-stone: #e3ddd1;
+  --color-mist: #6f6a60;
+  --color-surface: #faf7f2;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+.press {
+  transition: scale 150ms ease-out, background-color 180ms ease-out, color 180ms ease-out,
+    border-color 180ms ease-out, opacity 180ms ease-out;
+}
+
+.press:active:not(:disabled) {
+  scale: 0.96;
+}
+
+.bar-fill {
+  transition: width 280ms ease-out;
+}
+
+.sheet-panel {
+  max-height: 92dvh;
+  transition: transform 220ms ease-out, opacity 220ms ease-out;
+}
+
+.rise {
+  animation: rise 420ms ease-out both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dock {
+  padding-bottom: calc(0.55rem + env(safe-area-inset-bottom));
+}
+
+.chip-pine {
+  background: color-mix(in srgb, var(--color-pine) 16%, var(--color-paper));
+  color: var(--color-pine);
+}
+
+.chip-clay {
+  background: color-mix(in srgb, var(--color-clay) 16%, var(--color-paper));
+  color: var(--color-clay);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+
+  .press,
+  .bar-fill,
+  .sheet-panel {
+    transition: none;
+  }
+}
