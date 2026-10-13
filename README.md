@@ -6,12 +6,13 @@ Libreta local para compras a meses sin intereses.
 - El pago mensual lo pones tú y puedes repartir cada compra entre una o más personas.
 - Guarda el nombre de una tarjeta y su terminación de cuatro dígitos; nunca el número completo.
 - Los datos de las compras se guardan en el almacenamiento local del navegador; la libreta no sincroniza su contenido ni lo guarda en una base de datos remota.
-- El publicador puede configurar controles de acceso del sitio por separado. La página **/privacidad** explica el almacenamiento, las conexiones y cómo exportar o borrar los datos.
+- El publicador puede configurar controles de acceso del sitio por separado. La pestaña **Privacidad** explica el almacenamiento, las conexiones y cómo exportar o borrar los datos.
+- La pestaña **QR** muestra un código para abrir la app e instalarla desde el teléfono, la tableta o la computadora.
+- Todos los importes se muestran en pesos mexicanos (MXN).
 
 ## Servicios públicos
 
 - El calendario de días festivos de México consulta Nager.Date sin clave ni registro. Solo se envían el año y el país; la respuesta se cachea localmente por una semana y hay fechas de respaldo.
-- El tipo de cambio de referencia usa Frankfurter, también sin clave ni registro y solo si la persona pulsa **Consultar tipo de cambio**. El importe se convierte en el navegador; a la API solo llegan los códigos de moneda.
 
 Estos servicios no reciben nombres, compras, importes ni terminaciones de tarjeta. Las tasas de cambio son informativas y no representan la tasa ni las comisiones de una entidad bancaria.
 

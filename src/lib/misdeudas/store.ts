@@ -339,7 +339,7 @@ export function sanitizePersistedState(value: unknown): PersistedLedger | null {
   const purchases = uniqueById(parsedPurchases);
 
   const theme = z.enum(["system", "light", "dark"]).safeParse(raw.theme);
-  const tab = z.enum(["resumen", "compras", "personas", "tarjetas", "ajustes"]).safeParse(raw.tab);
+  const tab = z.enum(["resumen", "compras", "personas", "tarjetas", "ajustes", "privacidad", "instalar"]).safeParse(raw.tab);
   return {
     people,
     cards,

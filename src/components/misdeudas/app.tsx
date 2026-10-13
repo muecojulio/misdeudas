@@ -1,5 +1,4 @@
 import * as Tabs from "@radix-ui/react-tabs";
-import { Link } from "@tanstack/react-router";
 import {
   ArrowRight,
   CalendarDays,
@@ -7,6 +6,7 @@ import {
   CreditCard,
   LayoutDashboard,
   Plus,
+  QrCode,
   Receipt,
   Search,
   Settings as SettingsIcon,
@@ -24,12 +24,13 @@ import {
 } from "react";
 import { dashboard, viewPurchase, type PurchaseView } from "@/lib/misdeudas/calc";
 import { formatDay, formatDayShort, todayISO } from "@/lib/misdeudas/dates";
-import { parseExchangeReference, type ExchangeReference } from "@/lib/misdeudas/exchange-rates";
 import { loadHolidays, type HolidaySource } from "@/lib/misdeudas/holidays";
 import { formatPercent, money } from "@/lib/misdeudas/money";
 import { exportPayload, useLedger } from "@/lib/misdeudas/store";
 import type { Card, Holiday, Person, TabId } from "@/lib/misdeudas/types";
 import { CardForm, PersonForm, PurchaseForm } from "./forms";
+import { InstallQrPanel } from "./install-qr";
+import { PrivacyPolicyPanel } from "./privacy-policy";
 import { TabPanelTransition } from "./tab-panel-transition";
 import { HorizontalRail, PressButton, Progress, Sheet, SwipeReveal } from "./ui";
 
@@ -39,6 +40,8 @@ const TABS: { id: TabId; label: string; icon: typeof Receipt }[] = [
   { id: "personas", label: "Personas", icon: Users },
   { id: "tarjetas", label: "Tarjetas", icon: CreditCard },
   { id: "ajustes", label: "Ajustes", icon: SettingsIcon },
+  { id: "privacidad", label: "Privacidad", icon: ShieldCheck },
+  { id: "instalar", label: "QR", icon: QrCode },
 ];
 
 export function MisDeudasApp() {
@@ -65,7 +68,7 @@ export function MisDeudasApp() {
       if (state.people.length === 0 && state.purchases.length === 0 && !state.cleared) {
         state.loadExamples();
       }
-      if (!["resumen", "compras", "personas", "tarjetas", "ajustes"].includes(state.tab)) {
+      if (!TABS.some((item) => item.id === state.tab)) {
         state.setTab("resumen");
       }
       if (!["system", "light", "dark"].includes(state.theme)) state.setTheme("system");
@@ -245,8 +248,12 @@ export function MisDeudasApp() {
                     onAdd={() => setCardEditor({})}
                     onEdit={(id) => setCardEditor({ id })}
                   />
-                ) : (
+                ) : tab === "ajustes" ? (
                   <Settings holidaySource={holidaySource} holidayCount={holidays.length} />
+                ) : tab === "privacidad" ? (
+                  <PrivacyPolicyPanel />
+                ) : (
+                  <InstallQrPanel />
                 )}
               </TabPanelTransition>
             </Tabs.Content>
@@ -257,9 +264,6 @@ export function MisDeudasApp() {
               <ShieldCheck className="size-4" aria-hidden="true" /> Tus compras no se suben a una
               cuenta
             </span>
-            <Link to="/privacidad" className="footer-link">
-              Leer privacidad <ArrowRight className="size-3.5" aria-hidden="true" />
-            </Link>
           </footer>
         </div>
       </div>
@@ -321,7 +325,9 @@ function tabDescription(tab: TabId): string {
     compras: "Encuentra cada compra y sigue sus pagos.",
     personas: "Reparte cada plan con quien tú quieras.",
     tarjetas: "Controla tus tarjetas sin guardar el número completo.",
-    ajustes: "Apariencia, respaldo y privacidad de tu libreta.",
+    ajustes: "Apariencia, respaldo y datos de tu libreta.",
+    privacidad: "Qué guardamos, dónde se queda y cómo borrarlo.",
+    instalar: "Escanea el código para abrir e instalar la app en tu dispositivo.",
   };
   return descriptions[tab];
 }
@@ -1285,8 +1291,6 @@ function Settings({
         </p>
       </section>
 
-      <ExchangeRateCard />
-
       <section className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-icon settings-icon-apricot">
@@ -1302,15 +1306,9 @@ function Settings({
             Tus compras, personas y tarjetas se guardan en el almacenamiento de este navegador; no
             existe una cuenta ni una base de datos de compras en la aplicación.
           </p>
-          <p>
-            El calendario público recibe solo el año. El tipo de cambio se consulta cuando tú lo
-            pides y solo comparte códigos de moneda.
-          </p>
+          <p>El calendario público recibe solo el año.</p>
           <p>{sourceCopy}</p>
         </div>
-        <Link to="/privacidad" className="settings-link">
-          Leer la política de privacidad <ArrowRight className="size-4" aria-hidden="true" />
-        </Link>
       </section>
 
       <section className="settings-card">
@@ -1438,113 +1436,6 @@ function Settings({
         </p>
       ) : null}
     </div>
-  );
-}
-
-function ExchangeRateCard() {
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [reference, setReference] = useState<ExchangeReference | null>(null);
-  const [amount, setAmount] = useState("1000");
-
-  async function refresh() {
-    setStatus("loading");
-    try {
-      const response = await fetch("/api/exchange-rates?base=MXN&symbols=USD,EUR", {
-        headers: { accept: "application/json" },
-      });
-      if (!response.ok) throw new Error("rate");
-      const parsed = parseExchangeReference(await response.json());
-      if (!parsed) throw new Error("rate");
-      setReference(parsed);
-      setStatus("success");
-    } catch {
-      setStatus("error");
-    }
-  }
-
-  const pesos = Number(amount);
-  const converted = (currency: "USD" | "EUR") =>
-    reference && Number.isFinite(pesos) && pesos >= 0
-      ? new Intl.NumberFormat("es-MX", {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 2,
-        }).format(pesos * reference.rates[currency])
-      : "—";
-
-  return (
-    <section className="settings-card exchange-card">
-      <div className="settings-card-heading">
-        <span className="settings-icon settings-icon-sky">
-          <Sparkles className="size-5" aria-hidden="true" />
-        </span>
-        <div>
-          <h2 className="font-display text-2xl">Cambio de moneda</h2>
-          <p className="text-sm text-mist">Una referencia pública para compras en otro país.</p>
-        </div>
-      </div>
-      <div className="exchange-controls">
-        <label htmlFor="exchange-amount" className="text-sm font-semibold">
-          Monto en pesos
-        </label>
-        <input
-          id="exchange-amount"
-          className="min-h-11 w-full rounded-2xl border border-stone bg-surface px-3 tabular-nums outline-none focus-visible:border-pine focus-visible:ring-4 focus-visible:ring-pine/15"
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step="0.01"
-          value={amount}
-          onChange={(event) => setAmount(event.target.value)}
-        />
-        <PressButton
-          type="button"
-          onClick={refresh}
-          feedback={status === "idle" ? undefined : status}
-          feedbackLabel={
-            status === "loading"
-              ? "Consultando el servicio público"
-              : status === "success"
-                ? "Tipo de cambio actualizado"
-                : "No se pudo consultar el tipo de cambio"
-          }
-          className="settings-primary-button"
-        >
-          {status === "loading"
-            ? "Consultando…"
-            : status === "success"
-              ? "Actualizar referencia"
-              : "Consultar tipo de cambio"}
-        </PressButton>
-      </div>
-      {reference ? (
-        <div className="exchange-results" aria-live="polite">
-          <p className="text-sm font-semibold">
-            {converted("USD")} <span>USD</span>
-          </p>
-          <p className="text-sm font-semibold">
-            {converted("EUR")} <span>EUR</span>
-          </p>
-          <p className="exchange-date">
-            Referencia del{" "}
-            {new Date(`${reference.date}T12:00:00`).toLocaleDateString("es-MX", {
-              dateStyle: "long",
-            })}
-          </p>
-        </div>
-      ) : null}
-      {status === "error" ? (
-        <p className="exchange-error" role="alert" aria-live="assertive">
-          No se pudo consultar la fuente pública. Puedes intentarlo más tarde; tus compras no
-          cambian.
-        </p>
-      ) : null}
-      <p className="mt-3 text-xs leading-relaxed text-mist">
-        Cotización de referencia de Frankfurter (sin clave ni registro). La conversión se calcula
-        aquí; no se envía el monto. No incluye tipo de cambio, comisiones ni condiciones de tu
-        banco.
-      </p>
-    </section>
   );
 }
 
