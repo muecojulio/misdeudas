@@ -39,11 +39,7 @@ export function paymentNumber(purchase: Purchase, today: string): number {
   return clamp(Math.round(purchase.manualPayment), 0, purchase.months);
 }
 
-export function viewPurchase(
-  purchase: Purchase,
-  today: string,
-  holidays: Holiday[],
-): PurchaseView {
+export function viewPurchase(purchase: Purchase, today: string, holidays: Holiday[]): PurchaseView {
   const number = paymentNumber(purchase, today);
   const remainingMonths = purchase.months - number;
   const paid = cents(purchase.monthlyPayment * number);
@@ -134,7 +130,7 @@ export function dashboard(views: PurchaseView[]) {
   const upcoming = active
     .filter((view) => view.nextDue)
     .slice()
-    .sort((a, b) => (a.nextDue! < b.nextDue! ? -1 : 1));
+    .sort((a, b) => a.nextDue!.localeCompare(b.nextDue!));
   return {
     remaining,
     paid,

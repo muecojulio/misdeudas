@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { paymentNumber, viewPurchase } from "./calc.ts";
+import { dashboard, paymentNumber, viewPurchase } from "./calc.ts";
 import type { Purchase } from "./types.ts";
 
 const holidays = [{ date: "2026-12-25", localName: "Navidad" }];
 
-function purchase(partial: Partial<Purchase> & Pick<Purchase, "operationDate" | "months">): Purchase {
+function purchase(
+  partial: Partial<Purchase> & Pick<Purchase, "operationDate" | "months">,
+): Purchase {
   return {
     id: "x",
     description: "Prueba",
@@ -26,7 +28,11 @@ test("cuenta un pago por cada mes cumplido, incluido el día de la compra", () =
 });
 
 test("una compra de 10 meses iniciada el 15 dic 2025 ya está liquidada el 12 oct 2026", () => {
-  const view = viewPurchase(purchase({ operationDate: "2025-12-15", months: 10, monthlyPayment: 899 }), "2026-10-12", []);
+  const view = viewPurchase(
+    purchase({ operationDate: "2025-12-15", months: 10, monthlyPayment: 899 }),
+    "2026-10-12",
+    [],
+  );
   assert.equal(view.settled, true);
   assert.equal(view.paymentNumber, 10);
   assert.equal(view.remaining, 0);
@@ -44,6 +50,28 @@ test("el pago 11 de 12 con fecha 25 ene cae en Navidad y se corre al lunes", () 
   assert.equal(view.chargeDate, "2026-12-28");
   assert.equal(view.remaining, 750);
   assert.equal(view.paid, 8250);
+});
+
+test("conserva el orden original cuando dos cargos tienen la misma fecha", () => {
+  const first = purchase({
+    id: "primera",
+    operationDate: "2026-10-12",
+    months: 12,
+    manualPayment: 0,
+  });
+  const second = purchase({
+    id: "segunda",
+    operationDate: "2026-10-12",
+    months: 12,
+    manualPayment: 0,
+  });
+  const upcoming = dashboard(
+    [first, second].map((item) => viewPurchase(item, "2026-10-12", [])),
+  ).upcoming;
+  assert.deepEqual(
+    upcoming.map((item) => item.purchase.id),
+    ["primera", "segunda"],
+  );
 });
 
 test("reparte el faltante a partes iguales sin perder centavos", () => {
