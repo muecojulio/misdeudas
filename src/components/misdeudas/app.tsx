@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
+  Wallet,
 } from "lucide-react";
 import {
   useEffect,
@@ -27,9 +28,11 @@ import { formatDay, formatDayShort, todayISO } from "@/lib/misdeudas/dates";
 import { loadHolidays, type HolidaySource } from "@/lib/misdeudas/holidays";
 import { formatPercent, money } from "@/lib/misdeudas/money";
 import { exportPayload, useLedger } from "@/lib/misdeudas/store";
-import type { Card, Holiday, Person, TabId } from "@/lib/misdeudas/types";
+import type { Card, Holiday, Payable, Person, TabId } from "@/lib/misdeudas/types";
 import { CardForm, PersonForm, PurchaseForm } from "./forms";
 import { InstallQrPanel } from "./install-qr";
+import { PaymentForm } from "./payment-form";
+import { MonthlyPaymentsSummary, PaymentsPanel } from "./payments";
 import { PrivacyPolicyPanel } from "./privacy-policy";
 import { TabPanelTransition } from "./tab-panel-transition";
 import { HorizontalRail, PressButton, Progress, Sheet, SwipeReveal } from "./ui";
@@ -37,6 +40,7 @@ import { HorizontalRail, PressButton, Progress, Sheet, SwipeReveal } from "./ui"
 const TABS: { id: TabId; label: string; icon: typeof Receipt }[] = [
   { id: "resumen", label: "Resumen", icon: LayoutDashboard },
   { id: "compras", label: "Compras", icon: Receipt },
+  { id: "pagos", label: "Pagos", icon: Wallet },
   { id: "personas", label: "Personas", icon: Users },
   { id: "tarjetas", label: "Tarjetas", icon: CreditCard },
   { id: "ajustes", label: "Ajustes", icon: SettingsIcon },
@@ -52,11 +56,15 @@ export function MisDeudasApp() {
   const people = useLedger((state) => state.people);
   const cards = useLedger((state) => state.cards);
   const purchases = useLedger((state) => state.purchases);
+  const payables = useLedger((state) => state.payables);
   const [today, setToday] = useState<string | null>(null);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [holidaySource, setHolidaySource] = useState<HolidaySource | "cargando">("cargando");
   const [editor, setEditor] = useState<null | { id?: string }>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [paymentEditor, setPaymentEditor] = useState<null | { id?: string; personId?: string }>(
+    null,
+  );
   const [personOpen, setPersonOpen] = useState(false);
   const [cardEditor, setCardEditor] = useState<null | { id?: string }>(null);
   const [panelDirection, setPanelDirection] = useState<"forward" | "backward">("forward");
@@ -65,7 +73,12 @@ export function MisDeudasApp() {
   useEffect(() => {
     void Promise.resolve(useLedger.persist.rehydrate()).finally(() => {
       const state = useLedger.getState();
-      if (state.people.length === 0 && state.purchases.length === 0 && !state.cleared) {
+      if (
+        state.people.length === 0 &&
+        state.purchases.length === 0 &&
+        state.payables.length === 0 &&
+        !state.cleared
+      ) {
         state.loadExamples();
       }
       if (!TABS.some((item) => item.id === state.tab)) {
@@ -201,6 +214,16 @@ export function MisDeudasApp() {
                 <Plus className="size-5" aria-hidden="true" />
                 <span className="hidden sm:inline">Agregar compra</span>
               </PressButton>
+            ) : ready && tab === "pagos" ? (
+              <PressButton
+                type="button"
+                aria-label="Agregar pago"
+                className="new-purchase-button flex shrink-0 items-center justify-center gap-2 rounded-full bg-pine px-4 font-semibold text-on-pine"
+                onClick={() => setPaymentEditor({})}
+              >
+                <Plus className="size-5" aria-hidden="true" />
+                <span className="hidden sm:inline">Agregar pago</span>
+              </PressButton>
             ) : null}
           </section>
 
@@ -229,6 +252,10 @@ export function MisDeudasApp() {
                     onOpen={setDetailId}
                     hasExamples={purchases.some((purchase) => purchase.example)}
                     onExamples={() => handleTabChange("ajustes")}
+                    payables={payables}
+                    today={today}
+                    onAddPayable={() => setPaymentEditor({})}
+                    onViewPayables={() => handleTabChange("pagos")}
                   />
                 ) : tab === "compras" ? (
                   <Purchases
@@ -237,6 +264,15 @@ export function MisDeudasApp() {
                     cardsById={cardsById}
                     meId={me?.id}
                     onOpen={setDetailId}
+                  />
+                ) : tab === "pagos" ? (
+                  <PaymentsPanel
+                    payables={payables}
+                    people={people}
+                    today={today}
+                    onAddPerson={() => setPersonOpen(true)}
+                    onAdd={(personId) => setPaymentEditor({ personId })}
+                    onEdit={(id) => setPaymentEditor({ id })}
                   />
                 ) : tab === "personas" ? (
                   <People views={views} people={people} onAdd={() => setPersonOpen(true)} />
@@ -261,8 +297,8 @@ export function MisDeudasApp() {
 
           <footer className="app-footer">
             <span>
-              <ShieldCheck className="size-4" aria-hidden="true" /> Tus compras no se suben a una
-              cuenta
+              <ShieldCheck className="size-4" aria-hidden="true" /> Tus compras y pagos no se suben
+              a una cuenta
             </span>
           </footer>
         </div>
@@ -277,6 +313,20 @@ export function MisDeudasApp() {
             key={editor.id ?? "nueva"}
             initial={purchases.find((purchase) => purchase.id === editor.id)}
             onDone={() => setEditor(null)}
+          />
+        ) : null}
+      </Sheet>
+      <Sheet
+        open={paymentEditor != null}
+        title={paymentEditor?.id ? "Editar pago" : "Nuevo pago"}
+        onClose={() => setPaymentEditor(null)}
+      >
+        {paymentEditor ? (
+          <PaymentForm
+            key={paymentEditor.id ?? paymentEditor.personId ?? "nuevo-pago"}
+            initial={payables.find((payable) => payable.id === paymentEditor.id)}
+            defaultPersonId={paymentEditor.personId}
+            onDone={() => setPaymentEditor(null)}
           />
         ) : null}
       </Sheet>
@@ -321,8 +371,9 @@ export function MisDeudasApp() {
 
 function tabDescription(tab: TabId): string {
   const descriptions: Record<TabId, string> = {
-    resumen: "Lo importante de tus mensualidades, de un vistazo.",
+    resumen: "Tus mensualidades y lo que debes pagar a cada persona.",
     compras: "Encuentra cada compra y sigue sus pagos.",
+    pagos: "Registra lo que tú debes pagar, a quién y en qué fecha.",
     personas: "Reparte cada plan con quien tú quieras.",
     tarjetas: "Controla tus tarjetas sin guardar el número completo.",
     ajustes: "Apariencia, respaldo y datos de tu libreta.",
@@ -431,6 +482,10 @@ function Summary({
   onOpen,
   hasExamples,
   onExamples,
+  payables,
+  today,
+  onAddPayable,
+  onViewPayables,
 }: {
   board: ReturnType<typeof dashboard>;
   meId?: string;
@@ -439,6 +494,10 @@ function Summary({
   onOpen: (id: string) => void;
   hasExamples: boolean;
   onExamples: () => void;
+  payables: Payable[];
+  today: string;
+  onAddPayable: () => void;
+  onViewPayables: () => void;
 }) {
   const plan = board.paid + board.remaining;
   const progress = plan > 0 ? Math.min(100, (board.paid / plan) * 100) : 0;
@@ -473,7 +532,7 @@ function Summary({
         <div className="summary-hero-main">
           <div className="min-w-0">
             <p id="summary-balance-title" className="hero-secondary text-sm font-medium">
-              Te falta por pagar
+              Te falta en compras a meses
             </p>
             <p className="summary-balance tabular-nums">{money(board.remaining)}</p>
             {mine && Math.abs(mine.remaining - board.remaining) > 0.5 ? (
@@ -538,8 +597,20 @@ function Summary({
         </article>
       </div>
 
+      <MonthlyPaymentsSummary
+        payables={payables}
+        peopleById={peopleById}
+        today={today}
+        onAdd={onAddPayable}
+        onViewAll={onViewPayables}
+      />
+
       <section className="dashboard-section">
-        <SectionTitle icon={Users} title="Por persona" detail="Así va el reparto" />
+        <SectionTitle
+          icon={Users}
+          title="Reparto de compras"
+          detail="Así va la parte de cada persona"
+        />
         {board.byPerson.size === 0 ? (
           <Empty text="Cuando agregues una compra, aquí verás cuánto le falta a cada quien." />
         ) : (
@@ -1303,8 +1374,8 @@ function Settings({
         </div>
         <div className="privacy-summary-copy">
           <p>
-            Tus compras, personas y tarjetas se guardan en el almacenamiento de este navegador; no
-            existe una cuenta ni una base de datos de compras en la aplicación.
+            Tus compras, pagos, personas y tarjetas se guardan en el almacenamiento de este
+            navegador; no existe una cuenta ni una base de datos de compras en la aplicación.
           </p>
           <p>El calendario público recibe solo el año.</p>
           <p>{sourceCopy}</p>
@@ -1403,7 +1474,7 @@ function Settings({
           <div>
             <h2 className="font-display text-2xl text-clay">Borrar tu libreta</h2>
             <p className="text-sm text-mist">
-              Elimina personas, compras y tarjetas de este navegador.
+              Elimina personas, compras, pagos y tarjetas de este navegador.
             </p>
           </div>
         </div>

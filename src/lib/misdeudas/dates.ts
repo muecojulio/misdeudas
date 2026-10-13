@@ -19,6 +19,31 @@ export function isISODate(value: string): boolean {
   return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
 }
 
+const MONTH_NAMES = [
+  "enero",
+  "febrero",
+  "marzo",
+  "abril",
+  "mayo",
+  "junio",
+  "julio",
+  "agosto",
+  "septiembre",
+  "octubre",
+  "noviembre",
+  "diciembre",
+];
+
+export function isISOMonth(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value) && isISODate(`${value}-01`);
+}
+
+export function formatMonth(month: string): string {
+  if (!isISOMonth(month)) return month;
+  const [year, number] = month.split("-").map(Number);
+  return `${MONTH_NAMES[number - 1]} de ${year}`;
+}
+
 export function formatDay(iso: string): string {
   if (!isISODate(iso)) return iso;
   const [y, m, d] = iso.split("-").map(Number);

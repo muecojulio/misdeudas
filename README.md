@@ -4,6 +4,9 @@ Libreta local para compras a meses sin intereses.
 
 - Cuántos pagos van (por ejemplo, 3 de 12), cuánto llevas pagado y cuánto falta.
 - El pago mensual lo pones tú y puedes repartir cada compra entre una o más personas.
+- La pestaña **Pagos**, después de **Compras**, registra compras o gastos que tú debes pagar a otras personas: nombre, concepto, importe y fecha de pago. Permite marcarlos como pagados y deshacerlo.
+- **Resumen** muestra el total pendiente por persona para el mes y año elegidos, según la fecha de pago; los pagos ya realizados se muestran aparte. El reparto de compras a meses se conserva por separado.
+- Los pagos se incluyen en la copia JSON y en el borrado de la libreta. Se siguen aceptando respaldos anteriores sin pagos.
 - Guarda el nombre de una tarjeta y su terminación de cuatro dígitos; nunca el número completo.
 - Los datos de las compras se guardan en el almacenamiento local del navegador; la libreta no sincroniza su contenido ni lo guarda en una base de datos remota.
 - El publicador puede configurar controles de acceso del sitio por separado. La pestaña **Privacidad** explica el almacenamiento, las conexiones y cómo exportar o borrar los datos.
@@ -18,7 +21,7 @@ Estos servicios no reciben nombres, compras, importes ni terminaciones de tarjet
 
 ## Base de datos e índices
 
-La aplicación no consulta una base de datos relacional; conserva colecciones locales de personas, tarjetas y compras en el navegador. Por ello no hay índices SQL que convenga crear ni una migración de datos de negocio. Los conjuntos están acotados y los resúmenes se derivan en memoria.
+La aplicación no consulta una base de datos relacional; conserva colecciones locales de personas, tarjetas, compras y pagos en el navegador. Por ello no hay índices SQL que convenga crear ni una migración de datos de negocio. Los conjuntos están acotados y los resúmenes se derivan en memoria.
 
 ## Componentes accesibles
 
