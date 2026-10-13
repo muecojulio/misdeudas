@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -142,6 +142,64 @@ function authPopupPlugin(): Plugin {
   };
 }
 
+const vercelNodeMajor = Math.max(
+  20,
+  Number.parseInt(process.versions.node.split(".")[0] ?? "22", 10) || 22,
+);
+const vercelRuntime = `nodejs${vercelNodeMajor}.x`;
+
+const SECURITY_HEADERS: Record<string, string> = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), usb=()",
+};
+
+function patchVercelBuildOutputConfig(outputDir: string): void {
+  const configPath = join(outputDir, "config.json");
+  if (!existsSync(configPath)) return;
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf8")) as {
+      version?: number;
+      routes?: Array<Record<string, unknown>>;
+    };
+    if (!Array.isArray(parsed.routes)) return;
+
+    const routes = parsed.routes.map((route) => {
+      if (
+        route &&
+        typeof route === "object" &&
+        "headers" in route &&
+        !("dest" in route) &&
+        !("status" in route) &&
+        !("handle" in route)
+      ) {
+        return { ...route, continue: true };
+      }
+      return route;
+    });
+
+    const hasSecurityHeaders = routes.some(
+      (route) =>
+        route.src === "/(.*)" &&
+        typeof route.headers === "object" &&
+        route.headers !== null &&
+        "X-Content-Type-Options" in route.headers,
+    );
+    if (!hasSecurityHeaders) {
+      routes.unshift({
+        src: "/(.*)",
+        headers: SECURITY_HEADERS,
+        continue: true,
+      });
+    }
+
+    parsed.routes = routes;
+    writeFileSync(configPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  } catch (err) {
+    console.warn("[vercel-config] Failed to patch .vercel/output/config.json:", err);
+  }
+}
+
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
@@ -176,7 +234,14 @@ export default defineConfig(({ command, isPreview }) => ({
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
-            vercel: { functions: { runtime: "nodejs24.x" } },
+            vercel: { functions: { runtime: vercelRuntime } },
+            modules: [
+              (nitroInstance) => {
+                nitroInstance.hooks.hook("compiled", () => {
+                  patchVercelBuildOutputConfig(nitroInstance.options.output.dir);
+                });
+              },
+            ],
           }),
         ]
       : []),
