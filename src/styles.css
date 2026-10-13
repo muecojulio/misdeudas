@@ -1493,57 +1493,71 @@ body {
   font-size: 0.88rem;
 }
 
-.exchange-controls {
+.install-qr-frame {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 0.5rem 0.7rem;
+  min-height: 15rem;
+  place-items: center;
   margin-top: 1rem;
-}
-
-.exchange-controls label {
-  grid-column: 1 / -1;
-}
-
-.exchange-controls input {
-  min-width: 0;
-}
-
-.exchange-results {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
-  margin-top: 0.8rem;
-}
-
-.exchange-results p {
-  margin: 0;
-  padding: 0.75rem;
+  padding: 1rem;
   border: 1px solid var(--color-stone);
+  border-radius: 1.4rem;
+  background: #ffffff;
+}
+
+.install-qr-image {
+  width: min(240px, 100%);
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.install-link-row {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.install-link {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 0.6rem 0.75rem;
   border-radius: 1rem;
   background: color-mix(in srgb, var(--color-sky) 22%, var(--color-surface));
-  font-variant-numeric: tabular-nums;
-}
-
-.exchange-results p span {
-  color: var(--color-mist);
-  font-size: 0.75rem;
-}
-
-.exchange-results .exchange-date {
-  grid-column: 1 / -1;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--color-mist);
-  font-size: 0.73rem;
-  font-weight: 400;
-}
-
-.exchange-error {
-  margin: 0.7rem 0 0;
-  color: var(--color-clay);
   font-size: 0.84rem;
+}
+
+.install-steps {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+.install-step-card {
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--color-stone);
+  border-radius: 1.2rem;
+  background: var(--color-paper);
+}
+
+.install-step-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.install-step-card ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.policy-panel {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding-bottom: 2rem;
 }
 
 /* Accessible combo box, disclosure, and modal sheet */
@@ -2123,7 +2137,6 @@ body {
     align-items: start;
   }
 
-  .exchange-card,
   .settings-danger-card,
   .settings-feedback {
     grid-column: 1 / -1;

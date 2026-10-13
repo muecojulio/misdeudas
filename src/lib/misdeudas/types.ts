@@ -40,4 +40,11 @@ export type Holiday = {
 
 export type ThemeChoice = "system" | "light" | "dark";
 
-export type TabId = "resumen" | "compras" | "personas" | "tarjetas" | "ajustes";
+export type TabId =
+  | "resumen"
+  | "compras"
+  | "personas"
+  | "tarjetas"
+  | "ajustes"
+  | "privacidad"
+  | "instalar";
