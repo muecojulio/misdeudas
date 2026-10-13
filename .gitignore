@@ -1,11 +1,15 @@
 node_modules
-.grok
+.node_modules.lock
+.grok/*
+!.grok/app-env.json
 screenshots
 artifacts
 .vercel
+.nitro
 dist
 .output
 .env
 .env.*
 *.log
 .DS_Store
+
